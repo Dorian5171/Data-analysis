@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>数据分析系统 · v0.9.1</title>
+  <title>数据分析系统 · v0.9.3</title>
   <style>
     :root {
       --bg: #f5f8f6;
@@ -5957,8 +5957,9 @@
 
     .report-chart-canvas svg {
       width: 100%;
-      height: 100%;
-      max-height: 305px;
+      height: auto;
+      max-height: 100%;
+      display: block;
       font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
     }
 
@@ -6473,7 +6474,72 @@
 
     .preprocess-ai-running .preprocess-ai-spinner { display: inline-block; }
 
+    .preprocess-ai-source-grid {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(180px, .72fr);
+      gap: 9px;
+    }
+
+    .preprocess-ai-source-field {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+    }
+
+    .preprocess-ai-source-field label {
+      color: var(--text-secondary);
+      font-size: 10px;
+      font-weight: 650;
+    }
+
+    .preprocess-ai-source-select {
+      width: 100%;
+      min-width: 0;
+      min-height: 36px;
+      padding: 0 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      color: var(--text);
+      background: #fff;
+      outline: none;
+      font-size: 11px;
+    }
+
+    .preprocess-ai-source-select:focus {
+      border-color: var(--green-500);
+      box-shadow: 0 0 0 3px rgba(69, 173, 118, .1);
+    }
+
+    .preprocess-ai-source-summary {
+      min-width: 0;
+      min-height: 36px;
+      display: flex;
+      align-items: center;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--text-light);
+      background: var(--surface-soft);
+      font-size: 10px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .preprocess-ai-field-path {
+      min-height: 30px;
+      display: flex;
+      align-items: center;
+      padding: 6px 9px;
+      border-radius: 8px;
+      color: var(--green-800);
+      background: var(--green-100);
+      font-size: 10px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
     @media (max-width: 980px) {
+      .preprocess-ai-source-grid { grid-template-columns: 1fr; }
       .preprocess-control-grid { grid-template-columns: 1fr; }
       .preprocess-workspace-head { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .preprocess-workspace-meta { grid-column: 1 / -1; }
@@ -6854,6 +6920,58 @@
       contain-intrinsic-size: 220px;
     }
 
+
+    /* v0.9.3：图文报告项目实时关联与方案图表模板锁定 */
+    .report-template-lock-note {
+      min-height: 30px;
+      display: flex;
+      align-items: center;
+      padding: 6px 10px;
+      margin-bottom: 10px;
+      border: 1px solid var(--green-300);
+      border-radius: 9px;
+      color: var(--green-800);
+      background: var(--green-100);
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+
+
+    /* v0.9.4：图文报告与方案设计、知识库共用同一图表渲染内核 */
+    .report-chart-canvas[data-template-renderer="unified"] {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+      align-content: center;
+      justify-content: stretch;
+    }
+
+    .report-chart-canvas[data-template-renderer="unified"] svg {
+      width: 100%;
+      max-width: 100%;
+      justify-self: stretch;
+      align-self: center;
+      flex: 0 1 auto;
+    }
+
+    .report-chart-pair[data-chart-aspect="wide"] { height: 500px; }
+    .report-chart-pair[data-chart-aspect="compact"] { height: 550px; }
+    .report-chart-pair[data-chart-aspect="standard"] { height: 610px; }
+
+    .report-chart-canvas[data-chart-aspect="wide"] { min-height: 410px; }
+    .report-chart-canvas[data-chart-aspect="compact"] { min-height: 470px; }
+    .report-chart-canvas[data-chart-aspect="standard"] { min-height: 530px; }
+
+    @media (max-width: 1040px) {
+      .report-chart-pair[data-chart-aspect] { height: auto; }
+      .report-chart-canvas[data-chart-aspect="wide"] { min-height: 390px; }
+      .report-chart-canvas[data-chart-aspect="compact"] { min-height: 440px; }
+      .report-chart-canvas[data-chart-aspect="standard"] { min-height: 500px; }
+    }
+
+    @media (max-width: 760px) {
+      .report-chart-canvas[data-chart-aspect] { min-height: 280px; }
+    }
 </style>
 </head>
 <body>
@@ -6863,7 +6981,7 @@
         <div class="brand-mark" aria-hidden="true"></div>
         <div class="brand-copy">
           <p class="brand-title">数据分析系统</p>
-          <div class="brand-version">Version 0.9.1</div>
+          <div class="brand-version">Version 0.9.3</div>
         </div>
       </div>
 
@@ -7540,11 +7658,23 @@
             <section class="preprocess-control-card">
               <div class="preprocess-control-head">
                 <h3>AI 处理</h3>
-                <span>读取当前项目授权范围内的数据底表并更新当前预处理表</span>
+                <span>先关联处理目标数据表，再按真实字段目录生成本地全量执行计划</span>
               </div>
-              <textarea class="preprocess-textarea ai" id="preprocessAIInstruction" maxlength="4000" placeholder="输入需要执行的匹配、合并、清洗、计算或填充逻辑"></textarea>
+              <div class="preprocess-ai-source-grid">
+                <div class="preprocess-ai-source-field">
+                  <label for="preprocessAIDataView">处理目标数据表</label>
+                  <select class="preprocess-ai-source-select" id="preprocessAIDataView"></select>
+                </div>
+                <div class="preprocess-ai-source-field">
+                  <label for="preprocessAIFieldSelect">目标字段（可选）</label>
+                  <select class="preprocess-ai-source-select" id="preprocessAIFieldSelect"><option value="">按需求自动识别</option></select>
+                </div>
+              </div>
+              <div class="preprocess-ai-source-summary" id="preprocessAIDataViewSummary">请选择项目和预处理子表。</div>
+              <div class="preprocess-ai-field-path" id="preprocessAIFieldPath">字段定位：按自然语言需求从所选数据表中识别。</div>
+              <textarea class="preprocess-textarea ai" id="preprocessAIInstruction" maxlength="4000" placeholder="例如：将所选表的“绩效得分”空值填充为部门中位数，并新增“是否达标”列"></textarea>
               <div class="preprocess-control-footer">
-                <small>结果通过结构和来源校验后写入；执行失败时保留当前表。</small>
+                <small>AI只读取所选数据表的字段结构、画像与代表性样本；全量数据在浏览器本地处理，成功后写入当前预处理子表。</small>
                 <button class="dashboard-action-button primary" id="preprocessAIButton" type="button">
                   <span class="preprocess-ai-spinner" aria-hidden="true"></span>
                   <span id="preprocessAIButtonText">AI 执行计算</span>
@@ -8295,7 +8425,7 @@
                 <strong>图文展示</strong>
                 <span>全部已选图表和结果表逐项呈现，每项对应一段客观结果描述</span>
               </div>
-              <div class="report-chart-list" id="reportChartList"></div>
+              <div class="report-template-lock-note">图表样式已锁定为当前方案模板。图表类型、顺序、标题、系列、类别、图例、坐标轴、网格线、数据标签和数字格式均从方案设计实时读取。</div><div class="report-chart-list" id="reportChartList"></div>
             </section>
 
             <section class="report-preview-section">
@@ -8738,7 +8868,7 @@
         button.classList.add("active");
         document.getElementById(`page-${target}`).classList.add("active");
         breadcrumbName.textContent = pageNames[target];
-        document.title = `${pageNames[target]} · 数据分析系统 v0.9.0`;
+        document.title = `${pageNames[target]} · 数据分析系统 v0.9.3`;
 
         if (target === "dashboard") {
           await window.dashboardRefreshProjectOptions?.();
@@ -8906,6 +9036,60 @@
           record.revisions.report = Number(record.revisions.report || 0) + 1;
         }
       };
+      const dashboardRevisionFingerprint = (dashboard) => {
+        if (!dashboard || typeof dashboard !== "object") return "";
+        const files = Array.isArray(dashboard.files) ? dashboard.files : [];
+        const preprocessing = dashboard.preprocessing && typeof dashboard.preprocessing === "object" ? dashboard.preprocessing : {};
+        return JSON.stringify({
+          savedAt: dashboard.savedAt || "",
+          files: files.map((file) => ({
+            id: file?.id || "", name: file?.name || "", updatedAt: file?.updatedAt || "",
+            sheets: (file?.sheets || []).map((sheet) => ({
+              id: sheet?.id || "", name: sheet?.logicalName || sheet?.name || "", updatedAt: sheet?.updatedAt || "",
+              rows: sheet?.rows?.length || 0,
+              cols: Math.max(0, ...(sheet?.rows || []).slice(0, 20).map((row) => Array.isArray(row) ? row.length : 0)),
+              header: Array.isArray(sheet?.rows?.[0]) ? sheet.rows[0].map((cell) => String(cell?.v ?? cell ?? "")).join("|") : ""
+            }))
+          })),
+          preprocessingSavedAt: preprocessing.savedAt || "",
+          preprocessingTables: (preprocessing.tables || []).map((table) => ({
+            id: table?.id || "", name: table?.name || "", updatedAt: table?.updatedAt || "",
+            rows: table?.matrix?.length || table?.rows?.length || 0,
+            cols: Math.max(0, ...((table?.matrix || table?.rows || []).slice(0, 20).map((row) => Array.isArray(row) ? row.length : 0)))
+          }))
+        });
+      };
+      const reconcileDashboardRelations = (record, previousDashboard, nextDashboard) => {
+        if (dashboardRevisionFingerprint(previousDashboard) === dashboardRevisionFingerprint(nextDashboard)) return;
+        const now = new Date().toISOString();
+        const execution = record.execution && typeof record.execution === "object" ? clone(record.execution) : null;
+        if (execution) {
+          execution.planRuns = {};
+          execution.currentResult = null;
+          execution.currentTables = [];
+          execution.currentError = "项目数据已更新，请重新执行方案";
+          execution.savedAt = now;
+          record.execution = execution;
+          record.revisions.execution = Number(record.revisions.execution || 0) + 1;
+        }
+        const report = record.report && typeof record.report === "object" ? clone(record.report) : null;
+        if (report) {
+          report.planReports = report.planReports && typeof report.planReports === "object" ? report.planReports : {};
+          Object.keys(report.planReports).forEach((planId) => {
+            const item = report.planReports[planId];
+            report.planReports[planId] = {
+              ...item,
+              status: "项目数据已更新",
+              execution: null,
+              ai: null,
+              updatedAt: now
+            };
+          });
+          report.savedAt = now;
+          record.report = report;
+          record.revisions.report = Number(record.revisions.report || 0) + 1;
+        }
+      };
       const emit = (detail) => window.dispatchEvent(new CustomEvent("dataAnalysisAgent:project-updated", { detail }));
       const mutate = (projectId, section, mutator, action = "update") => enqueue(projectId, async () => {
         const record = clone(await readRaw(projectId)) || baseRecord(projectId);
@@ -8913,6 +9097,7 @@
         const previousSection = clone(record[section]);
         await mutator(record);
         if (section === "analysis") reconcileAnalysisRelations(record, previousSection, record.analysis);
+        if (section === "dashboard") reconcileDashboardRelations(record, previousSection, record.dashboard);
         record.revisions[section] = Number(record.revisions[section] || 0) + 1;
         record.updatedAt = new Date().toISOString();
         await writeRaw(record);
@@ -9653,6 +9838,10 @@
       preprocessHeaderInput: document.getElementById("preprocessHeaderInput"),
       preprocessFirstColumnInput: document.getElementById("preprocessFirstColumnInput"),
       preprocessImportButton: document.getElementById("preprocessImportButton"),
+      preprocessAIDataView: document.getElementById("preprocessAIDataView"),
+      preprocessAIFieldSelect: document.getElementById("preprocessAIFieldSelect"),
+      preprocessAIDataViewSummary: document.getElementById("preprocessAIDataViewSummary"),
+      preprocessAIFieldPath: document.getElementById("preprocessAIFieldPath"),
       preprocessAIInstruction: document.getElementById("preprocessAIInstruction"),
       preprocessAIButton: document.getElementById("preprocessAIButton"),
       preprocessAIButtonText: document.getElementById("preprocessAIButtonText"),
@@ -11718,6 +11907,8 @@
           sourceText: String(table.sourceText || ""),
           sourceHeaderText: String(table.sourceHeaderText || ""),
           sourceFirstColumnText: String(table.sourceFirstColumnText || ""),
+          linkedDataViewId: String(table.linkedDataViewId || ""),
+          linkedFieldName: String(table.linkedFieldName || ""),
           createdAt: table.createdAt || new Date().toISOString(),
           updatedAt: table.updatedAt || new Date().toISOString(),
           lastAIInstruction: String(table.lastAIInstruction || ""),
@@ -11768,6 +11959,8 @@
       dashboardElements.preprocessHeaderInput.disabled = !projectReady;
       dashboardElements.preprocessFirstColumnInput.disabled = !projectReady;
       dashboardElements.preprocessImportButton.disabled = !projectReady;
+      dashboardElements.preprocessAIDataView.disabled = !projectReady || !tableReady || dashboardState.preprocessAIRunning;
+      dashboardElements.preprocessAIFieldSelect.disabled = !projectReady || !tableReady || dashboardState.preprocessAIRunning;
       dashboardElements.preprocessAIInstruction.disabled = !projectReady || !tableReady || dashboardState.preprocessAIRunning;
       dashboardElements.preprocessAIButton.disabled = !projectReady || !tableReady || !dashboardPreprocessIsAIEnabled() || dashboardState.preprocessAIRunning;
       dashboardElements.preprocessNewTable.disabled = !projectReady;
@@ -11859,6 +12052,8 @@
         sourceText: "",
         sourceHeaderText: "",
         sourceFirstColumnText: "",
+        linkedDataViewId: "",
+        linkedFieldName: "",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         lastAIInstruction: "",
@@ -11902,6 +12097,8 @@
         table.sourceText = `${headerText}\n${firstColumnText}`;
         table.sourceHeaderText = headerText;
         table.sourceFirstColumnText = firstColumnText;
+        table.linkedDataViewId = dashboardPreprocessCurrentDataViewId(table);
+        table.linkedFieldName = "";
         dashboardState.preprocessSelectedCell = null;
         dashboardState.preprocessSearch = "";
         dashboardState.preprocessFilter = null;
@@ -11932,6 +12129,8 @@
         sourceText: table.sourceText || "",
         sourceHeaderText: table.sourceHeaderText || "",
         sourceFirstColumnText: table.sourceFirstColumnText || "",
+        linkedDataViewId: table.linkedDataViewId || "",
+        linkedFieldName: table.linkedFieldName || "",
         lastAIInstruction: table.lastAIInstruction || "",
         lastOperations: dashboardClone(table.lastOperations || []),
         sourceUsage: dashboardClone(table.sourceUsage || []),
@@ -12115,23 +12314,196 @@
       return (sheet?.rows || []).map((row) => (row || []).map((cell) => dashboardCellRaw(cell)));
     }
 
-    function dashboardPreprocessSourceCatalogue() {
+    function dashboardPreprocessDataViewId(kind, fileId = "", sheetId = "") {
+      return [kind, fileId, sheetId].map((value) => encodeURIComponent(String(value || ""))).join("::");
+    }
+
+    function dashboardPreprocessParseDataViewId(value) {
+      const parts = String(value || "").split("::").map((item) => {
+        try { return decodeURIComponent(item); } catch (error) { return item; }
+      });
+      return { kind: parts[0] || "", fileId: parts[1] || "", sheetId: parts[2] || "" };
+    }
+
+    function dashboardPreprocessCurrentDataViewId(table) {
+      return table ? dashboardPreprocessDataViewId("preprocess", table.id, table.id) : "";
+    }
+
+    function dashboardPreprocessFieldCatalogue(matrix, prefix = "target") {
+      const rawHeaders = Array.isArray(matrix?.[0]) ? matrix[0].map((value) => String(value ?? "")) : [];
+      const resolvedHeaders = dashboardPreprocessResolvedHeaders(matrix || [[]]);
+      return resolvedHeaders.map((resolvedName, index) => {
+        const rawName = String(rawHeaders[index] ?? "").trim();
+        const aliases = [...new Set([
+          resolvedName,
+          rawName,
+          `第${index + 1}列`,
+          `列${index + 1}`,
+          `字段_${index + 1}`,
+          `字段${index + 1}`
+        ].filter(Boolean))];
+        return {
+          fieldId: `${prefix}::${index}`,
+          index,
+          rawName,
+          resolvedName,
+          aliases
+        };
+      });
+    }
+
+    function dashboardPreprocessDataViews(table) {
+      const views = [];
+      if (table) {
+        views.push({
+          id: dashboardPreprocessCurrentDataViewId(table),
+          kind: "preprocess",
+          group: "当前预处理表",
+          label: table.name,
+          tableId: table.id
+        });
+      }
+      (dashboardState.files || []).forEach((file) => (file.sheets || []).forEach((sheet) => {
+        views.push({
+          id: dashboardPreprocessDataViewId("raw", file.id, sheet.id),
+          kind: "raw",
+          group: file.name,
+          label: sheet.logicalName || sheet.name,
+          fileId: file.id,
+          sheetId: sheet.id
+        });
+      }));
+      (dashboardState.preprocessing?.tables || []).filter((item) => item.id !== table?.id).forEach((item) => {
+        views.push({
+          id: dashboardPreprocessDataViewId("preprocess", item.id, item.id),
+          kind: "preprocess",
+          group: "其他预处理表",
+          label: item.name,
+          tableId: item.id
+        });
+      });
+      return views;
+    }
+
+    function dashboardPreprocessTargetContext(table, requestedViewId = "", options = {}) {
+      if (!table) return null;
+      const includeMatrix = options.includeMatrix !== false;
+      const available = dashboardPreprocessDataViews(table);
+      const fallbackId = dashboardPreprocessCurrentDataViewId(table);
+      const selected = available.find((view) => view.id === requestedViewId)
+        || available.find((view) => view.id === table.linkedDataViewId)
+        || available.find((view) => view.id === fallbackId)
+        || available[0];
+      if (!selected) return null;
+      let sourceMatrix = null;
+      let rawHeaders = [];
+      let rowCount = 0;
+      let fileName = "";
+      let sheetName = selected.label || "";
+      if (selected.kind === "raw") {
+        const file = dashboardState.files.find((item) => String(item.id) === String(selected.fileId));
+        const sheet = file?.sheets?.find((item) => String(item.id) === String(selected.sheetId));
+        if (!file || !sheet) return dashboardPreprocessTargetContext(table, fallbackId, options);
+        const sheetRows = Array.isArray(sheet.rows) ? sheet.rows : [];
+        rawHeaders = (sheetRows[0] || []).map((cell) => String(dashboardCellRaw(cell) ?? ""));
+        rowCount = Math.max(0, sheetRows.length - 1);
+        if (includeMatrix) sourceMatrix = dashboardPreprocessPrimitiveRows(sheet);
+        fileName = file.name;
+        sheetName = sheet.logicalName || sheet.name;
+      } else {
+        const sourceTable = dashboardState.preprocessing.tables.find((item) => String(item.id) === String(selected.tableId));
+        if (!sourceTable?.matrix?.length) return dashboardPreprocessTargetContext(table, fallbackId, options);
+        rawHeaders = (sourceTable.matrix[0] || []).map((value) => String(value ?? ""));
+        rowCount = Math.max(0, sourceTable.matrix.length - 1);
+        if (includeMatrix) sourceMatrix = sourceTable.matrix;
+        fileName = dashboardState.preprocessing.name || "数据预处理";
+        sheetName = sourceTable.name;
+      }
+      const headerMatrix = [rawHeaders];
+      const resolvedHeaders = dashboardPreprocessResolvedHeaders(headerMatrix);
+      const normalized = includeMatrix
+        ? dashboardPreprocessNormalizeMatrix((sourceMatrix || [rawHeaders]).map((row) => Array.isArray(row) ? row.slice() : []))
+        : null;
+      if (normalized) normalized[0] = resolvedHeaders.slice();
+      const fieldCatalogue = dashboardPreprocessFieldCatalogue(headerMatrix, selected.kind === "raw" ? `raw::${selected.fileId}::${selected.sheetId}` : `preprocess::${selected.tableId}`);
+      return {
+        ...selected,
+        id: selected.id,
+        fileName,
+        sheetName,
+        matrix: normalized,
+        rawHeaders,
+        resolvedHeaders,
+        fieldCatalogue,
+        rowCount,
+        columnCount: resolvedHeaders.length,
+        label: `${fileName ? `${fileName} / ` : ""}${sheetName}`
+      };
+    }
+
+    function dashboardPreprocessRenderAISource(table) {
+      const select = dashboardElements.preprocessAIDataView;
+      const fieldSelect = dashboardElements.preprocessAIFieldSelect;
+      if (!table || !dashboardState.projectId) {
+        select.innerHTML = '<option value="">暂无可关联数据表</option>';
+        fieldSelect.innerHTML = '<option value="">按需求自动识别</option>';
+        dashboardElements.preprocessAIDataViewSummary.textContent = "请选择项目和预处理子表。";
+        dashboardElements.preprocessAIFieldPath.textContent = "字段定位：按自然语言需求从所选数据表中识别。";
+        return;
+      }
+      const views = dashboardPreprocessDataViews(table);
+      let selectedId = table.linkedDataViewId;
+      if (!views.some((view) => view.id === selectedId)) selectedId = dashboardPreprocessCurrentDataViewId(table);
+      table.linkedDataViewId = selectedId;
+      const groups = new Map();
+      views.forEach((view) => {
+        if (!groups.has(view.group)) groups.set(view.group, []);
+        groups.get(view.group).push(view);
+      });
+      select.innerHTML = [...groups.entries()].map(([group, items]) => `<optgroup label="${dashboardEscape(group)}">${items.map((view) => `<option value="${dashboardEscape(view.id)}"${view.id === selectedId ? " selected" : ""}>${dashboardEscape(view.label)}</option>`).join("")}</optgroup>`).join("");
+      const context = dashboardPreprocessTargetContext(table, selectedId, { includeMatrix: false });
+      if (!context) {
+        fieldSelect.innerHTML = '<option value="">按需求自动识别</option>';
+        dashboardElements.preprocessAIDataViewSummary.textContent = "所选数据表已不存在，请重新选择。";
+        return;
+      }
+      const previousField = context.resolvedHeaders.includes(table.linkedFieldName) ? table.linkedFieldName : "";
+      table.linkedFieldName = previousField;
+      fieldSelect.innerHTML = '<option value="">按需求自动识别</option>' + context.resolvedHeaders.map((name, index) => `<option value="${dashboardEscape(name)}"${name === previousField ? " selected" : ""}>${dashboardEscape(name)} · 第${index + 1}列</option>`).join("");
+      dashboardElements.preprocessAIDataViewSummary.textContent = `${context.label} · ${context.rowCount.toLocaleString("zh-CN")}行 × ${context.columnCount}列 · AI仅上传字段画像和代表性样本`;
+      dashboardElements.preprocessAIFieldPath.textContent = previousField
+        ? `字段定位：${context.label} / ${previousField}。AI必须使用该字段的精确名称。`
+        : `字段定位：${context.label}。可选择目标字段，也可由AI根据需求在${context.columnCount}个字段中识别。`;
+    }
+
+    function dashboardPreprocessSourceCatalogue(selectedViewId = "") {
       return dashboardState.files.map((file) => ({
         fileId: file.id,
         fileName: file.name,
         sheets: (file.sheets || []).map((sheet) => {
-          const primitive = dashboardPreprocessPrimitiveRows(sheet);
-          const headers = (primitive[0] || []).map((value, index) => String(value || `字段_${index + 1}`));
-          const profile = systemProfileRows(headers, primitive.slice(1), {
-            profileLimit: SYSTEM_LARGE_DATA_CONFIG.profileSampleRows,
+          const sheetRows = Array.isArray(sheet.rows) ? sheet.rows : [];
+          const rawHeaders = (sheetRows[0] || []).map((cell) => String(dashboardCellRaw(cell) ?? ""));
+          const headers = dashboardPreprocessResolvedHeaders([rawHeaders]);
+          const totalRows = Math.max(0, sheetRows.length - 1);
+          const sampleIndexes = systemDeterministicSampleIndices(totalRows, SYSTEM_LARGE_DATA_CONFIG.profileSampleRows).map((index) => index + 1);
+          const sampledRows = sampleIndexes.map((rowIndex) => (sheetRows[rowIndex] || []).map((cell) => dashboardCellRaw(cell)));
+          const profile = systemProfileRows(headers, sampledRows, {
+            profileLimit: sampledRows.length,
             sampleLimit: SYSTEM_LARGE_DATA_CONFIG.aiSampleRows
           });
+          profile.row_count = totalRows;
+          profile.column_count = headers.length;
+          profile.profile_basis = sampledRows.length;
           return {
             sheetId: sheet.id,
             sheetName: sheet.logicalName || sheet.name,
+            dataViewId: dashboardPreprocessDataViewId("raw", file.id, sheet.id),
+            selectedTarget: dashboardPreprocessDataViewId("raw", file.id, sheet.id) === selectedViewId,
+            rawHeaders,
             headers,
-            rowCount: profile.row_count,
-            columnCount: profile.column_count,
+            fields: dashboardPreprocessFieldCatalogue([rawHeaders], `source::${file.id}::${sheet.id}`),
+            rowCount: totalRows,
+            columnCount: headers.length,
             profile
           };
         })
@@ -12139,17 +12511,104 @@
     }
 
     function preprocessingSkillPrompt() {
-      return `# 数据预处理 AI Skill v0.9.1\n\n你负责把自然语言预处理需求转换为可由浏览器本地执行的结构化操作计划。输入仅包含字段目录、统计画像和代表性样本，不包含上万或十万行全量底表。全量数据由系统在本地执行，不得要求用户缩减数据。\n\n## 工作目标\n1. 识别字段匹配、VLOOKUP、Merge、清洗、空值处理、异常值处理、四则运算、分组聚合、筛选、去重、排序和更新逻辑。\n2. 只使用source_catalogue中真实存在的fileId、sheetId、字段名。字段匹配优先完全一致；近似匹配必须在message和ambiguities中说明。\n3. 只返回执行计划，不返回全量数据，不复制sample_rows，不输出代码。\n4. 当前预处理表字段可能为空或重复。优先使用resolved_headers；无法唯一判断时返回error。\n5. 关联计算必须明确目标键、来源键和来源值。出现一对多时使用first、last、latest、sum、mean、min、max、count或concat之一；用户未说明且无法判断时返回error。\n6. 操作按operations顺序执行。未被用户要求修改的字段和记录保持原值。\n\n## 支持的操作\n- rename_columns: {"type":"rename_columns","mapping":{"旧字段":"新字段"}}\n- trim: {"type":"trim","fields":["字段A"]}，fields为空表示全部字段\n- normalize_whitespace: {"type":"normalize_whitespace","fields":["字段A"]}\n- replace: {"type":"replace","field":"字段A","find":"旧值","replacement":"新值","exact":true}\n- fill_missing: {"type":"fill_missing","field":"字段A","strategy":"value|mean|median|mode|forward|backward","value":"可选"}\n- copy_column: {"type":"copy_column","source":"字段A","target":"字段B"}\n- calculate: {"type":"calculate","target":"新字段","expression":表达式}\n- lookup: {"type":"lookup","target":"结果字段","target_key":"目标键","source_file_id":"文件ID","source_sheet_id":"表ID","source_key":"来源键","source_value":"来源值","multiple":"first|last|latest|sum|mean|min|max|count|concat","order_by":"latest时可选字段","separator":"concat时可选"}\n- filter_rows: {"type":"filter_rows","logic":"AND|OR","conditions":[条件]}\n- remove_duplicates: {"type":"remove_duplicates","fields":["字段A"],"keep":"first|last"}\n- sort: {"type":"sort","fields":["字段A"],"directions":["asc|desc"]}\n- delete_columns: {"type":"delete_columns","fields":["字段A"]}\n- select_columns: {"type":"select_columns","fields":["字段A","字段B"]}\n- aggregate: {"type":"aggregate","group_by":["字段A"],"metrics":[{"field":"字段B","op":"count|sum|mean|min|max|median|unique_count|first|last|concat","as":"结果字段"}]}\n\n表达式格式：\n- 字段：{"field":"字段A"}\n- 常量：{"value":10}\n- 运算：{"op":"add|subtract|multiply|divide|mod|power|concat|coalesce|round|abs|lower|upper|trim|length|percentage|if","args":[...] }\n- if表达式：{"op":"if","condition":条件,"then":表达式,"else":表达式}\n条件格式：{"field":"字段A","operator":"eq|neq|gt|gte|lt|lte|contains|starts_with|ends_with|empty|not_empty|in","value":"值或数组"}\n\n## 输出协议\n只输出严格JSON。\n成功：\n{"status":"ok","message":"处理说明","target_table_name":"沿用原名或用户明确要求的新名称","execution_plan":{"version":"1.0","operations":[]},"source_usage":[{"fileId":"真实文件ID","sheetId":"真实表ID","fields":["真实字段名"]}],"warnings":[]}\n失败：\n{"status":"error","error":"明确错误原因","missing_fields":[],"ambiguities":[]}\n\n## 完整性约束\n- operations必须可由上述操作表示；无法表示时返回error。\n- 不返回target_table.rows或任何全量记录。\n- 不使用eval、JavaScript、Python、SQL或公式字符串。`;
+      return `# 数据预处理 AI Skill v0.9.2
+
+你负责把自然语言预处理需求转换为浏览器可执行的结构化操作计划。系统已经由用户明确选择处理目标数据表。输入只包含字段目录、统计画像与代表性样本；上万或十万行全量数据由浏览器本地执行。
+
+## 数据定位规则
+1. target_table是本次唯一处理目标。所有trim、replace、fill_missing、copy_column、calculate、filter_rows、remove_duplicates、sort、delete_columns、select_columns、aggregate与rename_columns操作，均只能引用target_table.resolved_headers中的字段。
+2. selected_field不为空时，将其视为用户明确指定的优先目标字段。除非需求明确涉及其他字段，不得改用同义字段。
+3. target_table.field_catalogue提供fieldId、index、rawName、resolvedName和aliases。执行计划中的字段名称优先使用resolvedName，禁止自行缩写、翻译或改写字段名。
+4. source_catalogue只用于lookup等跨表取值。lookup必须使用真实source_file_id、source_sheet_id，以及对应工作表headers中的source_key、source_value和order_by。
+5. 同名、近似名或重复字段无法唯一定位时返回error，并在ambiguities列出候选字段和所在数据表。不得猜测。
+6. 只返回执行计划，不返回全量数据，不复制sample_rows，不输出代码。
+7. 未被用户要求修改的字段和记录保持原值。操作按operations顺序执行。
+
+## 支持的操作
+- rename_columns: {"type":"rename_columns","mapping":{"旧字段":"新字段"}}
+- trim: {"type":"trim","fields":["字段A"]}，fields为空表示全部字段
+- normalize_whitespace: {"type":"normalize_whitespace","fields":["字段A"]}
+- replace: {"type":"replace","field":"字段A","find":"旧值","replacement":"新值","exact":true}
+- fill_missing: {"type":"fill_missing","field":"字段A","strategy":"value|mean|median|mode|forward|backward","value":"可选"}
+- copy_column: {"type":"copy_column","source":"字段A","target":"字段B"}
+- calculate: {"type":"calculate","target":"新字段","expression":表达式}
+- lookup: {"type":"lookup","target":"结果字段","target_key":"目标键","source_file_id":"文件ID","source_sheet_id":"表ID","source_key":"来源键","source_value":"来源值","multiple":"first|last|latest|sum|mean|min|max|count|concat","order_by":"latest时可选字段","separator":"concat时可选"}
+- filter_rows: {"type":"filter_rows","logic":"AND|OR","conditions":[条件]}
+- remove_duplicates: {"type":"remove_duplicates","fields":["字段A"],"keep":"first|last"}
+- sort: {"type":"sort","fields":["字段A"],"directions":["asc|desc"]}
+- delete_columns: {"type":"delete_columns","fields":["字段A"]}
+- select_columns: {"type":"select_columns","fields":["字段A","字段B"]}
+- aggregate: {"type":"aggregate","group_by":["字段A"],"metrics":[{"field":"字段B","op":"count|sum|mean|min|max|median|unique_count|first|last|concat","as":"结果字段"}]}
+
+表达式格式：
+- 字段：{"field":"字段A"}
+- 常量：{"value":10}
+- 运算：{"op":"add|subtract|multiply|divide|mod|power|concat|coalesce|round|abs|lower|upper|trim|length|percentage|if","args":[...]}
+- if表达式：{"op":"if","condition":条件,"then":表达式,"else":表达式}
+条件格式：{"field":"字段A","operator":"eq|neq|gt|gte|lt|lte|contains|starts_with|ends_with|empty|not_empty|in","value":"值或数组"}
+
+## 输出协议
+只输出严格JSON。
+成功：
+{"status":"ok","message":"处理说明","target_table_name":"沿用原名或用户明确要求的新名称","target_usage":{"dataViewId":"必须等于target_table.data_view_id","fields":["目标表真实字段名"]},"execution_plan":{"version":"1.1","operations":[]},"source_usage":[{"fileId":"真实文件ID","sheetId":"真实表ID","fields":["真实字段名"]}],"warnings":[]}
+失败：
+{"status":"error","error":"明确错误原因","missing_fields":[],"ambiguities":[]}
+
+## 完整性约束
+- operations必须可由上述操作表示；无法表示时返回error。
+- target_usage.dataViewId必须等于target_table.data_view_id。
+- 不返回target_table.rows或任何全量记录。
+- 不使用eval、JavaScript、Python、SQL或公式字符串。`;
     }
     window.preprocessingSkillPrompt = preprocessingSkillPrompt;
 
+    function dashboardPreprocessNormalizeFieldToken(value) {
+      return String(value ?? "").normalize("NFKC").trim().toLowerCase()
+        .replace(/[“”‘’"'`]/g, "")
+        .replace(/[\s_\-—–·.。:：/\\()[\]{}【】]+/g, "");
+    }
+
     function dashboardPreprocessFieldIndex(headers, field, allowMissing = false) {
-      if (Number.isInteger(field)) return field >= 0 && field < headers.length ? field : -1;
-      const text = String(field ?? "").trim();
+      const list = Array.isArray(headers) ? headers.map((name) => String(name ?? "")) : [];
+      const objectField = field && typeof field === "object" && !Array.isArray(field) ? field : null;
+      if (objectField && Number.isInteger(objectField.index)) return objectField.index >= 0 && objectField.index < list.length ? objectField.index : -1;
+      if (Number.isInteger(field)) return field >= 0 && field < list.length ? field : -1;
+      const raw = objectField ? (objectField.resolvedName ?? objectField.name ?? objectField.label ?? objectField.fieldId ?? "") : field;
+      const text = String(raw ?? "").trim();
       if (!text) return -1;
-      let index = headers.findIndex((name) => String(name) === text);
-      if (index < 0) index = headers.findIndex((name) => String(name).trim().toLowerCase() === text.toLowerCase());
-      if (index < 0 && !allowMissing) throw new Error(`未找到字段：${text}`);
+      let index = list.findIndex((name) => name === text);
+      if (index < 0) index = list.findIndex((name) => name.trim().toLowerCase() === text.toLowerCase());
+      const idMatch = text.match(/::(\d+)$/);
+      if (index < 0 && idMatch) {
+        const parsed = Number(idMatch[1]);
+        if (parsed >= 0 && parsed < list.length) index = parsed;
+      }
+      const columnMatch = text.normalize("NFKC").match(/^(?:第)?(\d+)(?:列)?$/) || text.normalize("NFKC").match(/^字段[_\s-]?(\d+)$/i);
+      if (index < 0 && columnMatch) {
+        const parsed = Number(columnMatch[1]) - 1;
+        if (parsed >= 0 && parsed < list.length) index = parsed;
+      }
+      if (index < 0 && /^[A-Za-z]{1,3}$/.test(text)) {
+        let parsed = 0;
+        text.toUpperCase().split("").forEach((char) => { parsed = parsed * 26 + char.charCodeAt(0) - 64; });
+        parsed -= 1;
+        if (parsed >= 0 && parsed < list.length) index = parsed;
+      }
+      if (index < 0) {
+        const token = dashboardPreprocessNormalizeFieldToken(text);
+        const matches = list.map((name, idx) => ({ idx, token: dashboardPreprocessNormalizeFieldToken(name) })).filter((item) => item.token && item.token === token);
+        if (matches.length === 1) index = matches[0].idx;
+        else if (matches.length > 1 && !allowMissing) throw new Error(`字段匹配不唯一：${text}。候选字段：${matches.slice(0, 6).map((item) => list[item.idx]).join("、")}`);
+      }
+      if (index < 0) {
+        const token = dashboardPreprocessNormalizeFieldToken(text);
+        const contains = token.length >= 2 ? list.map((name, idx) => ({ idx, token: dashboardPreprocessNormalizeFieldToken(name) })).filter((item) => item.token.includes(token) || token.includes(item.token)) : [];
+        if (contains.length === 1) index = contains[0].idx;
+      }
+      if (index < 0 && !allowMissing) {
+        const suggestions = list.filter(Boolean).slice(0, 12).join("、");
+        throw new Error(`未找到字段：${text}${suggestions ? `。当前目标表字段示例：${suggestions}` : ""}`);
+      }
       return index;
     }
 
@@ -12236,9 +12695,9 @@
       const sheet = file?.sheets?.find((item) => String(item.id) === String(sheetId));
       if (!file) throw new Error(`来源文件不存在：${fileId}`);
       if (!sheet) throw new Error(`来源工作表不存在：${sheetId}`);
-      const rows = dashboardPreprocessPrimitiveRows(sheet);
-      const headers = dashboardPreprocessResolvedHeaders(rows);
-      return { file, sheet, headers, rows: rows.slice(1) };
+      const matrix = dashboardPreprocessPrimitiveRows(sheet);
+      const headers = dashboardPreprocessResolvedHeaders(matrix);
+      return { file, sheet, headers, rows: matrix.slice(1), matrix };
     }
 
     async function dashboardPreprocessYield(index, every = 5000) {
@@ -12264,6 +12723,82 @@
       if (op === "last") return nonEmpty[nonEmpty.length - 1] ?? "";
       if (op === "concat") return [...new Set(nonEmpty.map(String))].join(separator);
       throw new Error(`不支持的聚合方式：${op}`);
+    }
+
+    function dashboardPreprocessNormalizeConditionFields(condition, headers) {
+      if (!condition || typeof condition !== "object") return condition;
+      const next = dashboardClone(condition);
+      if (next.field !== undefined) next.field = headers[dashboardPreprocessFieldIndex(headers, next.field)];
+      return next;
+    }
+
+    function dashboardPreprocessNormalizeExpressionFields(expression, headers) {
+      if (!expression || typeof expression !== "object" || Array.isArray(expression)) return expression;
+      const next = dashboardClone(expression);
+      if (next.field !== undefined) next.field = headers[dashboardPreprocessFieldIndex(headers, next.field)];
+      if (Array.isArray(next.args)) next.args = next.args.map((item) => dashboardPreprocessNormalizeExpressionFields(item, headers));
+      if (next.condition) next.condition = dashboardPreprocessNormalizeConditionFields(next.condition, headers);
+      if (next.then !== undefined) next.then = dashboardPreprocessNormalizeExpressionFields(next.then, headers);
+      if (next.else !== undefined) next.else = dashboardPreprocessNormalizeExpressionFields(next.else, headers);
+      return next;
+    }
+
+    function dashboardPreprocessNormalizeExecutionPlan(plan, targetContext) {
+      const normalized = dashboardClone(plan || {});
+      const operations = Array.isArray(normalized.operations) ? normalized.operations : [];
+      let headers = (targetContext?.resolvedHeaders || []).slice();
+      const resolve = (field) => headers[dashboardPreprocessFieldIndex(headers, field)];
+      const addTarget = (name) => {
+        const text = String(name || "").trim();
+        if (!text) throw new Error("目标字段名不能为空");
+        if (dashboardPreprocessFieldIndex(headers, text, true) < 0) headers.push(text);
+        return text;
+      };
+      operations.forEach((operation) => {
+        const type = String(operation?.type || "").toLowerCase();
+        if (type === "rename_columns") {
+          const mapping = {};
+          Object.entries(operation.mapping || {}).forEach(([from, to]) => {
+            const canonical = resolve(from);
+            const next = String(to || "").trim();
+            if (!next) throw new Error(`字段“${canonical}”的新名称为空`);
+            mapping[canonical] = next;
+            headers[dashboardPreprocessFieldIndex(headers, canonical)] = next;
+          });
+          operation.mapping = mapping;
+        } else if (["trim", "normalize_whitespace", "remove_duplicates", "sort", "delete_columns", "select_columns"].includes(type)) {
+          operation.fields = (operation.fields || []).map(resolve);
+          if (type === "delete_columns") headers = headers.filter((name) => !operation.fields.includes(name));
+          if (type === "select_columns") headers = operation.fields.slice();
+        } else if (["replace", "fill_missing"].includes(type)) {
+          operation.field = resolve(operation.field);
+        } else if (type === "copy_column") {
+          operation.source = resolve(operation.source);
+          operation.target = addTarget(operation.target);
+        } else if (type === "calculate") {
+          operation.expression = dashboardPreprocessNormalizeExpressionFields(operation.expression, headers);
+          operation.target = addTarget(operation.target);
+        } else if (type === "lookup") {
+          operation.target_key = resolve(operation.target_key);
+          operation.target = addTarget(operation.target);
+          const source = dashboardPreprocessSourceSheet(operation.source_file_id, operation.source_sheet_id);
+          operation.source_key = source.headers[dashboardPreprocessFieldIndex(source.headers, operation.source_key)];
+          operation.source_value = source.headers[dashboardPreprocessFieldIndex(source.headers, operation.source_value)];
+          if (operation.order_by) operation.order_by = source.headers[dashboardPreprocessFieldIndex(source.headers, operation.order_by)];
+        } else if (type === "filter_rows") {
+          operation.conditions = (operation.conditions || []).map((condition) => dashboardPreprocessNormalizeConditionFields(condition, headers));
+        } else if (type === "aggregate") {
+          operation.group_by = (operation.group_by || []).map(resolve);
+          operation.metrics = (operation.metrics || []).map((metric, index) => ({
+            ...metric,
+            field: String(metric.op || "") === "count" && !metric.field ? "" : resolve(metric.field),
+            as: String(metric.as || `${metric.op || "metric"}_${index + 1}`)
+          }));
+          headers = [...operation.group_by, ...operation.metrics.map((metric) => metric.as)];
+        }
+      });
+      normalized.operations = operations;
+      return normalized;
     }
 
     async function dashboardPreprocessExecutePlan(table, plan, progress) {
@@ -12514,7 +13049,7 @@
         const sheet = file?.sheets?.find((item) => item.sheetId === usage.sheetId);
         if (!file) issues.push(`来源文件不存在：${usage.fileId}`);
         else if (!sheet) issues.push(`来源工作表不存在：${usage.sheetId}`);
-        else (usage.fields || []).forEach((field) => { if (!sheet.headers.includes(field)) issues.push(`来源字段不存在：${field}`); });
+        else (usage.fields || []).forEach((field) => { if (dashboardPreprocessFieldIndex(sheet.headers, field, true) < 0) issues.push(`来源字段不存在：${field}`); });
       });
       return issues;
     }
@@ -12550,20 +13085,25 @@
       };
     }
 
-    function dashboardPreprocessBuildAIPayload(table, instruction) {
-      const resolvedHeaders = dashboardPreprocessResolvedHeaders(table.matrix);
-      const targetRows = table.matrix.slice(1);
-      const targetProfile = systemProfileRows(resolvedHeaders, targetRows, {
+    function dashboardPreprocessBuildAIPayload(table, instruction, targetContext = dashboardPreprocessTargetContext(table)) {
+      if (!targetContext?.matrix?.length) throw new Error("未找到已关联的处理目标数据表");
+      const targetRows = targetContext.matrix.slice(1);
+      const targetProfile = systemProfileRows(targetContext.resolvedHeaders, targetRows, {
         profileLimit: SYSTEM_LARGE_DATA_CONFIG.profileSampleRows,
         sampleLimit: SYSTEM_LARGE_DATA_CONFIG.aiSampleRows
       });
-      const sourceCatalogue = dashboardPreprocessSourceCatalogue().map((file) => ({
+      const selectedField = targetContext.resolvedHeaders.includes(table.linkedFieldName) ? table.linkedFieldName : "";
+      const sourceCatalogue = dashboardPreprocessSourceCatalogue(targetContext.id).map((file) => ({
         fileId: file.fileId,
         fileName: file.fileName,
         sheets: file.sheets.map((sheet) => ({
           sheetId: sheet.sheetId,
           sheetName: sheet.sheetName,
+          dataViewId: sheet.dataViewId,
+          selectedTarget: sheet.selectedTarget,
+          rawHeaders: sheet.rawHeaders,
           headers: sheet.headers,
+          fields: sheet.fields,
           rowCount: sheet.rowCount,
           columnCount: sheet.columnCount,
           profile: dashboardPreprocessSlimProfile(sheet.profile, instruction)
@@ -12572,21 +13112,34 @@
       const payload = {
         project_id: dashboardState.projectId,
         instruction,
-        context_mode: "schema_profile_representative_samples",
+        context_mode: "selected_data_view_schema_profile_representative_samples",
         full_data_execution: "browser_local",
+        selected_field: selectedField || null,
         target_table: {
-          tableId: table.id,
-          name: table.name,
-          headers: table.matrix[0],
-          resolved_headers: resolvedHeaders,
-          profile: dashboardPreprocessSlimProfile(targetProfile, instruction)
+          data_view_id: targetContext.id,
+          source_kind: targetContext.kind,
+          file_id: targetContext.fileId || null,
+          sheet_id: targetContext.sheetId || null,
+          display_path: targetContext.label,
+          output_preprocess_table_id: table.id,
+          output_preprocess_table_name: table.name,
+          raw_headers: targetContext.rawHeaders,
+          resolved_headers: targetContext.resolvedHeaders,
+          field_catalogue: targetContext.fieldCatalogue,
+          row_count: targetContext.rowCount,
+          column_count: targetContext.columnCount,
+          profile: dashboardPreprocessSlimProfile(targetProfile, `${instruction} ${selectedField}`)
         },
         source_catalogue: sourceCatalogue,
         execution_contract: {
+          selected_target_is_authoritative: true,
+          target_fields_use_resolved_headers: true,
+          selected_field_has_priority: Boolean(selectedField),
           plan_only: true,
           no_full_rows_in_response: true,
           local_full_row_execution: true,
-          preserve_unmentioned_data: true
+          preserve_unmentioned_data: true,
+          write_result_to_current_preprocess_table: true
         }
       };
       let size = systemJsonSize(payload);
@@ -12602,21 +13155,25 @@
       if (size > SYSTEM_LARGE_DATA_CONFIG.aiHardChars) {
         payload.source_catalogue.forEach((file) => file.sheets.forEach((sheet) => {
           sheet.profile.fields = sheet.profile.fields.slice(0, 40).map((field) => ({ index: field.index, name: field.name, numeric_summary: field.numeric_summary }));
+          sheet.fields = sheet.fields.slice(0, 160);
         }));
         payload.target_table.profile.fields = payload.target_table.profile.fields.slice(0, 80);
-        payload.context_notice = "字段极多，详细画像按需求相关度截取；all_fields仍保留全部字段名称与位置。";
+        payload.context_notice = "字段极多，详细画像按需求相关度截取；target_table.field_catalogue仍保留目标表完整字段定位信息。";
         size = systemJsonSize(payload);
       }
-      return { payload, size, rowCount: targetRows.length };
+      return { payload, size, rowCount: targetRows.length, targetContext };
     }
 
-    function dashboardPreprocessValidateAIResult(result, table, instruction = "") {
+    function dashboardPreprocessValidateAIResult(result, table, instruction = "", targetContext = null) {
       if (!result || typeof result !== "object") throw new Error("AI结果为空");
       if (result.status === "error") {
         const details = [...(result.missing_fields || []), ...(result.ambiguities || [])].filter(Boolean);
         throw new Error(`${result.error || "AI无法完成当前预处理"}${details.length ? `：${details.join("；")}` : ""}`);
       }
       if (result.status !== "ok") throw new Error("AI结果缺少status=ok");
+      if (targetContext && result.target_usage?.dataViewId && String(result.target_usage.dataViewId) !== String(targetContext.id)) {
+        throw new Error(`AI返回的目标数据表与当前关联表不一致：${result.target_usage.dataViewId}`);
+      }
       const sourceIssues = dashboardPreprocessValidateSourceUsage(result.source_usage);
       if (sourceIssues.length) throw new Error(sourceIssues.join("；"));
       const executionPlan = result.execution_plan;
@@ -12641,23 +13198,29 @@
       if (!table?.matrix?.length) return dashboardPreprocessSetMessage("请先导入或新建预处理表。", "error");
       if (instruction.length < 8) return dashboardPreprocessSetMessage("AI预处理逻辑描述过短，请明确关联字段、计算口径和目标列。", "error");
       if (!dashboardPreprocessIsAIEnabled() || typeof window.callConfiguredAI !== "function") return dashboardPreprocessSetMessage("AI尚未启用，请先在设置维护中完成配置和连接测试。", "error");
-      const { payload, size, rowCount } = dashboardPreprocessBuildAIPayload(table, instruction);
+      const targetContext = dashboardPreprocessTargetContext(table, dashboardElements.preprocessAIDataView.value || table.linkedDataViewId);
+      if (!targetContext?.matrix?.length) return dashboardPreprocessSetMessage("请先关联有效的数据表。", "error");
+      table.linkedDataViewId = targetContext.id;
+      table.linkedFieldName = targetContext.resolvedHeaders.includes(dashboardElements.preprocessAIFieldSelect.value) ? dashboardElements.preprocessAIFieldSelect.value : "";
+      const { payload, size, rowCount } = dashboardPreprocessBuildAIPayload(table, instruction, targetContext);
       const payloadText = JSON.stringify(payload);
       const beforeAI = dashboardPreprocessTableSnapshot(table);
       dashboardState.preprocessAIRunning = true;
       dashboardElements.preprocessAIButton.classList.add("preprocess-ai-running");
       dashboardElements.preprocessAIButtonText.textContent = "AI规划中…";
       dashboardPreprocessUpdateGate();
-      dashboardPreprocessSetMessage(`正在发送字段画像与代表性样本：${rowCount.toLocaleString("zh-CN")}行全量数据不上传，AI上下文${systemFormatBytes(size)}。`, "warning");
+      dashboardPreprocessSetMessage(`已关联“${targetContext.label}”。正在发送字段画像与代表性样本：${rowCount.toLocaleString("zh-CN")}行全量数据不上传，AI上下文${systemFormatBytes(size)}。`, "warning");
       try {
         const content = await window.callConfiguredAI([
           { role: "system", content: preprocessingSkillPrompt() },
           { role: "user", content: payloadText }
         ], { json: true, thinking: "disabled", maxTokens: 8000, contextLabel: "数据预处理" });
         const result = dashboardPreprocessExtractJson(content);
-        const validated = dashboardPreprocessValidateAIResult(result, table, instruction);
+        const validated = dashboardPreprocessValidateAIResult(result, table, instruction, targetContext);
+        const normalizedPlan = dashboardPreprocessNormalizeExecutionPlan(validated.executionPlan, targetContext);
         dashboardElements.preprocessAIButtonText.textContent = "本地全量计算中…";
-        const matrix = await dashboardPreprocessExecutePlan(table, validated.executionPlan, (current, total, type) => {
+        const executionTable = { ...table, matrix: targetContext.matrix };
+        const matrix = await dashboardPreprocessExecutePlan(executionTable, normalizedPlan, (current, total, type) => {
           dashboardPreprocessSetMessage(`AI计划已确认，正在本地处理全量数据：第${current}/${total}步 ${type}。当前表${rowCount.toLocaleString("zh-CN")}行。`, "warning");
         });
         dashboardState.preprocessing.snapshots.push({
@@ -12676,20 +13239,28 @@
         table.updatedAt = new Date().toISOString();
         table.lastAIInstruction = instruction;
         table.lastOperations = validated.operations;
-        table.sourceUsage = validated.sourceUsage;
+        table.sourceUsage = [{
+          role: "target",
+          dataViewId: targetContext.id,
+          fileId: targetContext.fileId || "",
+          sheetId: targetContext.sheetId || "",
+          tableId: targetContext.tableId || "",
+          label: targetContext.label,
+          fields: table.linkedFieldName ? [table.linkedFieldName] : []
+        }, ...validated.sourceUsage];
         const afterAI = dashboardPreprocessTableSnapshot(table);
         dashboardPreprocessPushAction("AI预处理", table, beforeAI, afterAI);
         dashboardState.processingTouched = true;
         dashboardState.preprocessRangeCache = null;
         dashboardLog("AI预处理", `${table.name} / ${validated.operations.join("；") || instruction}`);
         const warningText = validated.warnings.length ? `\n提示：${validated.warnings.join("；")}` : "";
-        dashboardPreprocessSetMessage(`${validated.message}。已在浏览器本地完成${Math.max(0, table.matrix.length - 1).toLocaleString("zh-CN")}行全量处理。${validated.operations.length ? `\n执行记录：${validated.operations.join("；")}` : ""}${warningText}`);
+        dashboardPreprocessSetMessage(`${validated.message}。处理目标：${targetContext.label}${table.linkedFieldName ? ` / ${table.linkedFieldName}` : ""}。已在浏览器本地完成${Math.max(0, table.matrix.length - 1).toLocaleString("zh-CN")}行全量处理，并写入当前预处理子表。${validated.operations.length ? `\n执行记录：${validated.operations.join("；")}` : ""}${warningText}`);
         dashboardPreprocessRender();
         dashboardScheduleSave();
         dashboardSyncProjectMetadata();
       } catch (error) {
         dashboardPreprocessApplyTableSnapshot(table, beforeAI);
-        dashboardPreprocessSetMessage(`AI计算失败：${error.message}。当前预处理表未发生变化。`, "error");
+        dashboardPreprocessSetMessage(`AI计算失败：${error.message}。处理目标为“${targetContext?.label || "未确定"}”，当前预处理表未发生变化。`, "error");
         dashboardPreprocessRender();
       } finally {
         dashboardState.preprocessAIRunning = false;
@@ -12718,6 +13289,7 @@
             }).join("")
           : "";
         dashboardElements.preprocessTableName.value = table?.name || "";
+        dashboardPreprocessRenderAISource(table);
       }
       if (!table?.matrix?.length) {
         dashboardElements.preprocessHeaderInput.value = "";
@@ -13181,6 +13753,24 @@
     });
 
     dashboardElements.preprocessImportButton.addEventListener("click", dashboardPreprocessImport);
+    dashboardElements.preprocessAIDataView.addEventListener("change", () => {
+      const table = dashboardActivePreprocessTable();
+      if (!table) return;
+      table.linkedDataViewId = dashboardElements.preprocessAIDataView.value || dashboardPreprocessCurrentDataViewId(table);
+      table.linkedFieldName = "";
+      table.updatedAt = new Date().toISOString();
+      dashboardPreprocessRenderAISource(table);
+      dashboardScheduleSave();
+      dashboardPreprocessSetMessage(`已关联处理目标数据表：${dashboardPreprocessTargetContext(table, table.linkedDataViewId, { includeMatrix: false })?.label || "未确定"}。AI将只在该表中定位目标字段。`);
+    });
+    dashboardElements.preprocessAIFieldSelect.addEventListener("change", () => {
+      const table = dashboardActivePreprocessTable();
+      if (!table) return;
+      table.linkedFieldName = dashboardElements.preprocessAIFieldSelect.value || "";
+      table.updatedAt = new Date().toISOString();
+      dashboardPreprocessRenderAISource(table);
+      dashboardScheduleSave();
+    });
     dashboardElements.preprocessAIButton.addEventListener("click", dashboardRunPreprocessAI);
     dashboardElements.preprocessNewTable.addEventListener("click", () => {
       if (!dashboardState.projectId) return dashboardPreprocessSetMessage("请先选择关联项目。", "error");
@@ -14111,7 +14701,7 @@
     window.analysisRefreshContext = async function analysisRefreshContext(showMessage = true) {
       const projectId = analysisState.projectId || analysisElements.projectSelect.value || "";
       if (!projectId) return;
-      await analysisWriteWorkspace().catch(() => {});
+      if (analysisState.saveTimer) await analysisWriteWorkspace().catch(() => {});
       await analysisSwitchProject(projectId, { preserveSelection: true });
       if (showMessage) analysisSetMessage(`已从项目仓库同步项目资料、数据底表和 ${analysisState.plans.length} 套分析方案。`);
     };
@@ -17654,7 +18244,7 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       return svg;
     }
 
-    function knowledgeRenderChartSvg(code, options) {
+    function knowledgeRenderChartSvg(code, options, sourceData = null) {
       const colors=CHART_THEMES[options.theme]||CHART_THEMES.green;
       const seriesCount=options.seriesCount, pointCount=options.pointCount;
       const seriesNames=chartNormalizeNameList(options.seriesNames,seriesCount,"系列");
@@ -17662,9 +18252,32 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       const seriesLegend=Array.from({length:seriesCount},(_,i)=>({label:seriesNames[i],color:colors[i%colors.length]}));
       let legendItems=seriesLegend, content="", defs="";
       const categoryLabels=categoryNames;
+      const hasSourceData=Boolean(sourceData && typeof sourceData==="object");
+      const sourceRoot=hasSourceData?sourceData:{};
+      const source=(sourceRoot.data && typeof sourceRoot.data==="object" && !Array.isArray(sourceRoot.data))?sourceRoot.data:sourceRoot;
+      const providedSeries=Array.isArray(source.series)?source.series:(Array.isArray(sourceRoot.series)?sourceRoot.series:[]);
+      const providedValues=Array.isArray(source.values)?source.values:(Array.isArray(sourceRoot.values)?sourceRoot.values:[]);
+      const finiteOr=(value,fallback=0)=>{const number=Number(value);return Number.isFinite(number)?number:fallback;};
+      const sourceMatrix=Array.from({length:seriesCount},(_,s)=>Array.from({length:pointCount},(_,p)=>{
+        const seriesValue=providedSeries[s] && Array.isArray(providedSeries[s].values)?providedSeries[s].values[p]:undefined;
+        const flatValue=s===0?providedValues[p]:undefined;
+        return hasSourceData?finiteOr(seriesValue!==undefined?seriesValue:flatValue,0):chartValue(s,p);
+      }));
+      const sourceGroups=Array.isArray(source.groups)?source.groups:(Array.isArray(sourceRoot.groups)?sourceRoot.groups:[]);
+      const sourceGroupsMatrix=Array.isArray(source.groupsMatrix)?source.groupsMatrix:(Array.isArray(sourceRoot.groupsMatrix)?sourceRoot.groupsMatrix:[]);
+      const sourceMatrixValues=Array.isArray(source.matrix)?source.matrix:(Array.isArray(sourceRoot.matrix)?sourceRoot.matrix:[]);
+      const summaryFromGroup=(group,shift=0)=>{
+        if(group && [group.lo,group.q1,group.med??group.median,group.q3,group.hi].every((value)=>Number.isFinite(Number(value)))) return {lo:Number(group.lo),q1:Number(group.q1),med:Number(group.med??group.median),q3:Number(group.q3),hi:Number(group.hi)};
+        const values=(group?.values||[]).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
+        if(values.length){
+          const q=(p)=>{const pos=(values.length-1)*p,base=Math.floor(pos),rest=pos-base;return values[base]+(values[base+1]!==undefined?rest*(values[base+1]-values[base]):0);};
+          return {lo:values[0],q1:q(.25),med:q(.5),q3:q(.75),hi:values[values.length-1]};
+        }
+        return {lo:16+shift*.35,q1:32+shift*.55,med:49+shift*.65,q3:68+shift*.5,hi:88+shift*.2};
+      };
 
       if(["line","area"].includes(code)) {
-        const data=Array.from({length:seriesCount},(_,s)=>Array.from({length:pointCount},(_,p)=>chartValue(s,p)));
+        const data=sourceMatrix;
         const yScale=chartScale(data.flat(),options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep,{includeZero:code==="area"});
         const layout=chartLayout(options,legendItems), p=layout.plot;
         content+=chartAxisSvg({layout,options,yScale,xLabels:categoryLabels,xPlacement:"point"});
@@ -17673,7 +18286,7 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       }
 
       if(["bar","stacked_bar"].includes(code)) {
-        const data=Array.from({length:seriesCount},(_,s)=>Array.from({length:pointCount},(_,p)=>chartValue(s,p)));
+        const data=sourceMatrix;
         // 单指标、多群组比较：内部仍保持“多个系列 × 一个类别”，但横轴直接展示群组系列名称。
         // 这样纵轴是指标数值，横轴是实际比较对象，避免出现“胜任力得分”同时占据横纵轴的语义冲突。
         if(code==="bar" && pointCount===1 && seriesCount>1){
@@ -17698,7 +18311,7 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       }
 
       if(code==="horizontal_bar") {
-        const data=Array.from({length:seriesCount},(_,s)=>Array.from({length:pointCount},(_,p)=>chartValue(s,p)));
+        const data=sourceMatrix;
         const xScale=chartScale(data.flat(),options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep,{includeZero:true});
         const singleMeasureByGroup=pointCount===1 && seriesCount>1;
         const horizontalOptions={...options,xAxisTitle:options.xAxisTitle||options.yAxisTitle,yAxisTitle:options.yAxisTitle||"类别"};
@@ -17717,24 +18330,35 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       }
 
       if(["pie","donut"].includes(code)) {
-        const vals=Array.from({length:pointCount},(_,i)=>chartValue(0,i)),sum=vals.reduce((a,b)=>a+b,0);legendItems=vals.map((v,i)=>({label:`${categoryNames[i]} · ${Math.round(v/sum*100)}%`,color:colors[i%colors.length]}));const layout=chartLayout(options,legendItems),p=layout.plot,cx=p.x+p.w/2,cy=p.y+p.h/2,r=Math.min(p.w,p.h)*.36;let angle=0;
+        const vals=sourceMatrix[0].slice(0,pointCount),sum=vals.reduce((a,b)=>a+b,0)||1;legendItems=vals.map((v,i)=>({label:`${categoryNames[i]} · ${Math.round(v/sum*100)}%`,color:colors[i%colors.length]}));const layout=chartLayout(options,legendItems),p=layout.plot,cx=p.x+p.w/2,cy=p.y+p.h/2,r=Math.min(p.w,p.h)*.36;let angle=0;
         vals.forEach((v,i)=>{const next=angle+v/sum*360;content+=`<path d="${arcPath(cx,cy,r,angle,next,code==="donut"?r*.55:0)}" fill="${colors[i%colors.length]}" stroke="#fff" stroke-width="2"/>`;if(options.dataLabels){const mid=(angle+next)/2,[tx,ty]=polar(cx,cy,r*(code==="donut"?.78:.66),mid);content+=svgText(tx,ty+3,`${Math.round(v/sum*100)}%`,'text-anchor="middle" font-size="8.5" font-weight="650" fill="#fff"');}angle=next;});if(code==="donut")content+=svgText(cx,cy-4,seriesNames[0]||"总量",'text-anchor="middle" font-size="10" fill="#8b978f"')+svgText(cx,cy+20,chartFormat(sum,options),'text-anchor="middle" font-size="21" font-weight="700" fill="#174d34"');return chartBaseSvg(content,layout,options,legendItems,colors);
       }
 
       if(["scatter","bubble"].includes(code)) {
-        const groups=Array.from({length:seriesCount},(_,s)=>Array.from({length:pointCount},(_,p)=>({x:12+p*(78/Math.max(1,pointCount-1))+s*2.2,y:chartValue(s,p),size:10+((s+1)*(p+3)*7)%70})));
+        const groups=Array.from({length:seriesCount},(_,s)=>{
+          const item=providedSeries[s]||{};
+          const xs=Array.isArray(item.x)?item.x:(s===0 && Array.isArray(source.x)?source.x:[]);
+          const ys=Array.isArray(item.y)?item.y:(s===0 && Array.isArray(source.y)?source.y:[]);
+          const sizes=Array.isArray(item.sizes)?item.sizes:(s===0 && Array.isArray(source.sizes)?source.sizes:[]);
+          if(hasSourceData) return Array.from({length:Math.min(xs.length,ys.length)},(_,p)=>({x:finiteOr(xs[p]),y:finiteOr(ys[p]),size:Math.max(0,finiteOr(sizes[p],1))}));
+          return Array.from({length:pointCount},(_,p)=>({x:12+p*(78/Math.max(1,pointCount-1))+s*2.2,y:chartValue(s,p),size:10+((s+1)*(p+3)*7)%70}));
+        });
         const all=groups.flat(),xScale=chartScale(all.map(d=>d.x),options.xAxisAuto,options.xAxisMin,options.xAxisMax,options.xAxisStep),yScale=chartScale(all.map(d=>d.y),options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep);
         const layout=chartLayout(options,legendItems),p=layout.plot;content+=chartAxisSvg({layout,options,yScale,xScale,xNumeric:true});groups.forEach((group,s)=>group.forEach((d,i)=>{const x=chartMap(d.x,xScale,p.x,p.w),y=chartMap(d.y,yScale,p.y,p.h,true),r=code==="bubble"?4+Math.sqrt(d.size)*.75:options.markerSize,pointName=categoryNames[i]||`节点 ${i+1}`;content+=`<circle cx="${x}" cy="${y}" r="${r}" fill="${colors[s%colors.length]}" opacity=".62" stroke="#fff" stroke-width="1"><title>${escapeHtml(`${seriesNames[s]} · ${pointName}`)}</title></circle>`;if(options.dataLabels)content+=svgText(x,y-r-4,pointName,'text-anchor="middle" font-size="7.5" fill="#47544c"');}));return chartBaseSvg(content,layout,options,legendItems,colors);
       }
 
       if(code==="histogram") {
-        const xScale=chartScale([0,100],options.xAxisAuto,options.xAxisMin,options.xAxisMax,options.xAxisStep),bins=pointCount,values=Array.from({length:bins},(_,i)=>{const center=(bins-1)/2;return 12+58*Math.exp(-Math.pow(i-center,2)/(2*Math.pow(Math.max(1,bins/4),2)));}),yScale=chartScale(values,options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep,{includeZero:true});legendItems=[{label:seriesNames[0]||"频数",color:colors[0]}];const layout=chartLayout(options,legendItems),p=layout.plot;content+=chartAxisSvg({layout,options,yScale,xScale,xNumeric:true});const bw=p.w/bins;values.forEach((v,i)=>{const y=chartMap(v,yScale,p.y,p.h,true),base=chartMap(0,yScale,p.y,p.h,true),binName=categoryNames[i]||`区间 ${i+1}`;content+=`<rect x="${p.x+i*bw}" y="${y}" width="${Math.max(1,bw-1)}" height="${Math.max(1,base-y)}" fill="${colors[0]}" opacity=".84"><title>${escapeHtml(binName)}</title></rect>`;if(options.dataLabels){content+=svgText(p.x+(i+.5)*bw,y-4,chartFormat(v,options),'text-anchor="middle" font-size="7.5" fill="#47544c"');content+=svgText(p.x+(i+.5)*bw,base-5,binName,'text-anchor="middle" font-size="7" fill="#fff"');}});return chartBaseSvg(content,layout,options,legendItems,colors);
+        const xScale=chartScale([0,100],options.xAxisAuto,options.xAxisMin,options.xAxisMax,options.xAxisStep),bins=pointCount,values=hasSourceData?sourceMatrix[0].slice(0,bins):Array.from({length:bins},(_,i)=>{const center=(bins-1)/2;return 12+58*Math.exp(-Math.pow(i-center,2)/(2*Math.pow(Math.max(1,bins/4),2)));}),yScale=chartScale(values,options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep,{includeZero:true});legendItems=[{label:seriesNames[0]||"频数",color:colors[0]}];const layout=chartLayout(options,legendItems),p=layout.plot;content+=chartAxisSvg({layout,options,yScale,xScale,xNumeric:true});const bw=p.w/bins;values.forEach((v,i)=>{const y=chartMap(v,yScale,p.y,p.h,true),base=chartMap(0,yScale,p.y,p.h,true),binName=categoryNames[i]||`区间 ${i+1}`;content+=`<rect x="${p.x+i*bw}" y="${y}" width="${Math.max(1,bw-1)}" height="${Math.max(1,base-y)}" fill="${colors[0]}" opacity=".84"><title>${escapeHtml(binName)}</title></rect>`;if(options.dataLabels){content+=svgText(p.x+(i+.5)*bw,y-4,chartFormat(v,options),'text-anchor="middle" font-size="7.5" fill="#47544c"');content+=svgText(p.x+(i+.5)*bw,base-5,binName,'text-anchor="middle" font-size="7" fill="#fff"');}});return chartBaseSvg(content,layout,options,legendItems,colors);
       }
 
       if(["box","violin"].includes(code)) {
         const stats=Array.from({length:pointCount},(_,c)=>Array.from({length:seriesCount},(_,s)=>{
           const shift=(c*5+s*3)%12;
-          return {lo:16+shift*.35,q1:32+shift*.55,med:49+shift*.65,q3:68+shift*.5,hi:88+shift*.2};
+          if(!hasSourceData) return summaryFromGroup(null,shift);
+          const matrixGroup=sourceGroupsMatrix[c]?.[s];
+          const flatIndex=c*seriesCount+s;
+          const singleGroup=pointCount===1&&seriesCount>1?sourceGroups[s]:(seriesCount===1?sourceGroups[c]:sourceGroups[flatIndex]);
+          return summaryFromGroup(matrixGroup||singleGroup,shift);
         }));
         const yScale=chartScale(stats.flat(2).flatMap(d=>Object.values(d)),options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep);
         const singleMeasureByGroup=pointCount===1 && seriesCount>1;
@@ -17784,24 +18408,24 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       }
 
       if(code==="heatmap") {
-        const rows=seriesCount,cols=pointCount,values=Array.from({length:rows},(_,r)=>Array.from({length:cols},(_,c)=>(r*17+c*23+r*c*3)%101)),flat=values.flat();const colorScale=chartScale(flat,options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep);legendItems=[];const legendOptions={...options,legendVisible:false};const layout=chartLayout(legendOptions,[]),p=layout.plot,cw=p.w/cols,ch=p.h/rows;defs=`<linearGradient id="kbHeatGradient" x1="0" x2="1"><stop offset="0" stop-color="#eef6f1"/><stop offset="1" stop-color="${colors[0]}"/></linearGradient>`;
+        const rows=seriesCount,cols=pointCount,values=hasSourceData?Array.from({length:rows},(_,r)=>Array.from({length:cols},(_,c)=>finiteOr(sourceMatrixValues[r]?.[c],0))):Array.from({length:rows},(_,r)=>Array.from({length:cols},(_,c)=>(r*17+c*23+r*c*3)%101)),flat=values.flat();const colorScale=chartScale(flat,options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep);legendItems=[];const legendOptions={...options,legendVisible:false};const layout=chartLayout(legendOptions,[]),p=layout.plot,cw=p.w/cols,ch=p.h/rows;const heatGradientId=`kbHeatGradient_${String(code)}_${Math.abs(String(options.title||"").split("").reduce((sum,ch)=>sum+ch.charCodeAt(0),0))}`;defs=`<linearGradient id="${heatGradientId}" x1="0" x2="1"><stop offset="0" stop-color="#eef6f1"/><stop offset="1" stop-color="${colors[0]}"/></linearGradient>`;
         if(options.xAxisVisible)Array.from({length:cols},(_,c)=>content+=svgText(p.x+(c+.5)*cw,p.y+p.h+17,categoryNames[c],'text-anchor="middle" font-size="8.5" fill="#637168"'));if(options.yAxisVisible)Array.from({length:rows},(_,r)=>content+=svgText(p.x-8,p.y+(r+.5)*ch+3,seriesNames[r],'text-anchor="end" font-size="8.5" fill="#637168"'));
         values.forEach((row,r)=>row.forEach((v,c)=>{const ratio=chartClamp((v-colorScale.min)/(colorScale.max-colorScale.min||1),0,1);content+=`<rect x="${p.x+c*cw+1}" y="${p.y+r*ch+1}" width="${Math.max(1,cw-2)}" height="${Math.max(1,ch-2)}" rx="2" fill="${colors[0]}" opacity="${.12+.86*ratio}"/>`;if(options.dataLabels && cw>30 && ch>22)content+=svgText(p.x+(c+.5)*cw,p.y+(r+.58)*ch,chartFormat(v,options),`text-anchor="middle" font-size="7.5" fill="${ratio>.55?'#fff':'#47544c'}"`);}));
-        if(options.legendVisible){const gx=options.legendPosition==="right"?p.x+p.w+18:p.x+p.w-150,gy=options.legendPosition==="bottom"?p.y+p.h+35:p.y-24;content+=`<rect x="${gx}" y="${gy}" width="120" height="9" rx="4" fill="url(#kbHeatGradient)"/>${svgText(gx,gy+21,chartFormat(colorScale.min,options),'font-size="8" fill="#637168"')}${svgText(gx+120,gy+21,chartFormat(colorScale.max,options),'text-anchor="end" font-size="8" fill="#637168"')}`;}
+        if(options.legendVisible){const gx=options.legendPosition==="right"?p.x+p.w+18:p.x+p.w-150,gy=options.legendPosition==="bottom"?p.y+p.h+35:p.y-24;content+=`<rect x="${gx}" y="${gy}" width="120" height="9" rx="4" fill="url(#${heatGradientId})"/>${svgText(gx,gy+21,chartFormat(colorScale.min,options),'font-size="8" fill="#637168"')}${svgText(gx+120,gy+21,chartFormat(colorScale.max,options),'text-anchor="end" font-size="8" fill="#637168"')}`;}
         if(options.xAxisTitle)content+=svgText(p.x+p.w/2,p.y+p.h+38,options.xAxisTitle,'text-anchor="middle" font-size="10" fill="#47544c"');if(options.yAxisTitle)content+=`<text x="18" y="${p.y+p.h/2}" transform="rotate(-90 18 ${p.y+p.h/2})" text-anchor="middle" font-size="10" fill="#47544c">${escapeHtml(options.yAxisTitle)}</text>`;return chartBaseSvg(content,layout,legendOptions,[],colors,defs);
       }
 
       if(code==="radar") {
-        const raw=Array.from({length:seriesCount},(_,s)=>Array.from({length:pointCount},(_,i)=>chartValue(s,i))),scale=chartScale(raw.flat(),options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep,{includeZero:true}),layout=chartLayout(options,legendItems),p=layout.plot,cx=p.x+p.w/2,cy=p.y+p.h/2,r=Math.min(p.w,p.h)*.36,ticks=chartTicks(scale,6).filter(v=>v>=scale.min&&v<=scale.max);
+        const raw=sourceMatrix,scale=chartScale(raw.flat(),options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep,{includeZero:true}),layout=chartLayout(options,legendItems),p=layout.plot,cx=p.x+p.w/2,cy=p.y+p.h/2,r=Math.min(p.w,p.h)*.36,ticks=chartTicks(scale,6).filter(v=>v>=scale.min&&v<=scale.max);
         if(options.horizontalGrid)ticks.forEach(v=>{const rr=r*(v-scale.min)/(scale.max-scale.min||1),pts=Array.from({length:pointCount},(_,i)=>polar(cx,cy,rr,i*360/pointCount).join(","));content+=`<polygon points="${pts.join(" ")}" fill="none" stroke="#dfe9e2"/>`;if(options.yAxisVisible)content+=svgText(cx+4,cy-rr+10,chartFormat(v,options),'font-size="7.5" fill="#8b978f"');});for(let i=0;i<pointCount;i++){const [x,y]=polar(cx,cy,r,i*360/pointCount);if(options.xAxisVisible)content+=`<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="#d4e2d8"/>`;const [lx,ly]=polar(cx,cy,r+18,i*360/pointCount);content+=svgText(lx,ly+3,categoryNames[i],'text-anchor="middle" font-size="8.5" fill="#637168"');}raw.forEach((values,s)=>{const pts=values.map((v,i)=>{const rr=r*chartClamp((v-scale.min)/(scale.max-scale.min||1),0,1);return polar(cx,cy,rr,i*360/pointCount);});content+=`<polygon points="${pts.map(pt=>pt.join(",")).join(" ")}" fill="${colors[s%colors.length]}" fill-opacity="${Math.max(.05,.18-s*.02)}" stroke="${colors[s%colors.length]}" stroke-width="${options.lineWidth}"/>`;pts.forEach((pt,i)=>{if(options.showMarkers)content+=`<circle cx="${pt[0]}" cy="${pt[1]}" r="${options.markerSize*.65}" fill="${colors[s%colors.length]}"/>`;if(options.dataLabels)content+=svgText(pt[0],pt[1]-5,chartFormat(values[i],options),'text-anchor="middle" font-size="7" fill="#47544c"');});});return chartBaseSvg(content,layout,options,legendItems,colors);
       }
 
       if(code==="treemap") {
-        const count=Math.max(2,pointCount),nodes=Array.from({length:count},(_,i)=>({label:categoryNames[i],group:i%Math.max(1,seriesCount),value:20+((i*31)%80)}));legendItems=Array.from({length:Math.max(1,seriesCount)},(_,i)=>({label:seriesNames[i],color:colors[i%colors.length]}));const layout=chartLayout(options,legendItems),p=layout.plot,cols=Math.ceil(Math.sqrt(count)),rows=Math.ceil(count/cols),cw=p.w/cols,ch=p.h/rows;nodes.forEach((node,i)=>{const col=i%cols,row=Math.floor(i/cols),x=p.x+col*cw+2,y=p.y+row*ch+2;content+=`<rect x="${x}" y="${y}" width="${cw-4}" height="${ch-4}" rx="5" fill="${colors[node.group%colors.length]}" opacity="${.52+(i%4)*.1}"/>`;if(options.dataLabels||cw>75)content+=svgText(x+7,y+17,node.label,'font-size="8.5" fill="#fff"')+(options.dataLabels?svgText(x+7,y+31,chartFormat(node.value,options),'font-size="8" fill="#fff"'):"");});return chartBaseSvg(content,layout,options,legendItems,colors);
+        const count=Math.max(2,pointCount),treeValues=sourceMatrix[0]||[],nodes=Array.from({length:count},(_,i)=>({label:categoryNames[i],group:i%Math.max(1,seriesCount),value:hasSourceData?finiteOr(treeValues[i],0):20+((i*31)%80)}));legendItems=Array.from({length:Math.max(1,seriesCount)},(_,i)=>({label:seriesNames[i],color:colors[i%colors.length]}));const layout=chartLayout(options,legendItems),p=layout.plot,cols=Math.ceil(Math.sqrt(count)),rows=Math.ceil(count/cols),cw=p.w/cols,ch=p.h/rows;nodes.forEach((node,i)=>{const col=i%cols,row=Math.floor(i/cols),x=p.x+col*cw+2,y=p.y+row*ch+2;content+=`<rect x="${x}" y="${y}" width="${cw-4}" height="${ch-4}" rx="5" fill="${colors[node.group%colors.length]}" opacity="${.52+(i%4)*.1}"/>`;if(options.dataLabels||cw>75)content+=svgText(x+7,y+17,node.label,'font-size="8.5" fill="#fff"')+(options.dataLabels?svgText(x+7,y+31,chartFormat(node.value,options),'font-size="8" fill="#fff"'):"");});return chartBaseSvg(content,layout,options,legendItems,colors);
       }
 
       if(code==="waterfall") {
-        const deltas=Array.from({length:pointCount},(_,i)=>i===0?55:i===pointCount-1?0:(i%2?1:-1)*(10+(i*9)%26)),cums=[];let cumulative=0;deltas.forEach((d,i)=>{if(i===0)cumulative=d;else if(i<pointCount-1)cumulative+=d;cums.push(cumulative);});const scaleValues=[0,...cums,...cums.map((v,i)=>v-(i>0&&i<pointCount-1?deltas[i]:0))],yScale=chartScale(scaleValues,options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep,{includeZero:true});legendItems=[{label:"增加",color:colors[1]},{label:"减少",color:"#c96b62"},{label:"合计",color:colors[0]}];const layout=chartLayout(options,legendItems),p=layout.plot,labels=categoryNames;content+=chartAxisSvg({layout,options,yScale,xLabels:labels});const gap=p.w/pointCount,bw=Math.min(48,gap*.58);let previous=0;deltas.forEach((d,i)=>{const total=i===0||i===pointCount-1,start=total?0:previous,end=total?cums[i]:previous+d,x=p.x+(i+.5)*gap-bw/2,y1=chartMap(start,yScale,p.y,p.h,true),y2=chartMap(end,yScale,p.y,p.h,true),fill=total?colors[0]:d>=0?colors[1]:"#c96b62";content+=`<rect x="${x}" y="${Math.min(y1,y2)}" width="${bw}" height="${Math.max(2,Math.abs(y2-y1))}" rx="3" fill="${fill}"/>`;if(options.dataLabels)content+=svgText(x+bw/2,Math.min(y1,y2)-5,chartFormat(total?cums[i]:d,options),'text-anchor="middle" font-size="8" fill="#47544c"');previous=cums[i];if(i<pointCount-1){const nextX=p.x+(i+1.5)*gap-bw/2;content+=`<line x1="${x+bw}" y1="${chartMap(previous,yScale,p.y,p.h,true)}" x2="${nextX}" y2="${chartMap(previous,yScale,p.y,p.h,true)}" stroke="#9aa89f" stroke-dasharray="3 3"/>`;}});return chartBaseSvg(content,layout,options,legendItems,colors);
+        const deltas=hasSourceData?sourceMatrix[0].slice(0,pointCount):Array.from({length:pointCount},(_,i)=>i===0?55:i===pointCount-1?0:(i%2?1:-1)*(10+(i*9)%26)),cums=[];let cumulative=0;deltas.forEach((d,i)=>{if(i===0)cumulative=d;else if(i<pointCount-1)cumulative+=d;cums.push(cumulative);});const scaleValues=[0,...cums,...cums.map((v,i)=>v-(i>0&&i<pointCount-1?deltas[i]:0))],yScale=chartScale(scaleValues,options.yAxisAuto,options.yAxisMin,options.yAxisMax,options.yAxisStep,{includeZero:true});legendItems=[{label:"增加",color:colors[1]},{label:"减少",color:"#c96b62"},{label:"合计",color:colors[0]}];const layout=chartLayout(options,legendItems),p=layout.plot,labels=categoryNames;content+=chartAxisSvg({layout,options,yScale,xLabels:labels});const gap=p.w/pointCount,bw=Math.min(48,gap*.58);let previous=0;deltas.forEach((d,i)=>{const total=i===0||i===pointCount-1,start=total?0:previous,end=total?cums[i]:previous+d,x=p.x+(i+.5)*gap-bw/2,y1=chartMap(start,yScale,p.y,p.h,true),y2=chartMap(end,yScale,p.y,p.h,true),fill=total?colors[0]:d>=0?colors[1]:"#c96b62";content+=`<rect x="${x}" y="${Math.min(y1,y2)}" width="${bw}" height="${Math.max(2,Math.abs(y2-y1))}" rx="3" fill="${fill}"/>`;if(options.dataLabels)content+=svgText(x+bw/2,Math.min(y1,y2)-5,chartFormat(total?cums[i]:d,options),'text-anchor="middle" font-size="8" fill="#47544c"');previous=cums[i];if(i<pointCount-1){const nextX=p.x+(i+1.5)*gap-bw/2;content+=`<line x1="${x+bw}" y1="${chartMap(previous,yScale,p.y,p.h,true)}" x2="${nextX}" y2="${chartMap(previous,yScale,p.y,p.h,true)}" stroke="#9aa89f" stroke-dasharray="3 3"/>`;}});return chartBaseSvg(content,layout,options,legendItems,colors);
       }
 
       const fallbackLayout=chartLayout(options,legendItems);return chartBaseSvg(svgText(fallbackLayout.plot.x+fallbackLayout.plot.w/2,fallbackLayout.plot.y+fallbackLayout.plot.h/2,"模板预览待配置",'text-anchor="middle" font-size="13" fill="#8b978f"'),fallbackLayout,options,legendItems,colors);
@@ -18086,7 +18710,13 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
         subjectValues: plan.subjectValues || [],
         subjectColumns: plan.subjectColumns || [],
         restrictions: plan.restrictions || [],
-        missingPolicy: plan.missingPolicy || executionState.missingPolicy || "listwise"
+        missingPolicy: plan.missingPolicy || executionState.missingPolicy || "listwise",
+        chartMode: plan.chartMode || "auto",
+        charts: plan.charts || [],
+        chartConfigs: plan.chartConfigs || {},
+        chartConfigOverrides: plan.chartConfigOverrides || {},
+        tableFormat: plan.tableFormat || "three_line",
+        chartNote: plan.chartNote || ""
       };
       return JSON.stringify(snapshot);
     }
@@ -18212,17 +18842,21 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
     }
 
     async function executionLoadPlans(projectId) {
+      let memoryPlans = [];
       try {
         if (typeof analysisState !== "undefined" && analysisState.projectId === projectId && Array.isArray(analysisState.plans)) {
           if (analysisState.saveTimer) await analysisWriteWorkspace();
-          return analysisState.plans.map((plan, index) => analysisMigratePlan(executionClone(plan), index));
+          memoryPlans = analysisState.plans.map((plan, index) => analysisMigratePlan(executionClone(plan), index));
         }
       } catch (error) {}
       try {
         const saved = await window.projectRepository.getSection(projectId, "analysis");
-        return Array.isArray(saved?.plans) ? saved.plans.map((plan, index) => analysisMigratePlan(plan, index)) : [];
-      } catch (error) { return []; }
+        const repositoryPlans = Array.isArray(saved?.plans) ? saved.plans.map((plan, index) => analysisMigratePlan(plan, index)) : [];
+        if (repositoryPlans.length || !memoryPlans.length) return repositoryPlans;
+      } catch (error) {}
+      return memoryPlans;
     }
+
     async function executionLoadData(projectId) { return analysisLoadDashboardData(projectId); }
 
     async function executionRefreshProjectOptions(preferredId = null) {
@@ -18484,6 +19118,32 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       if (!indexes.length) return scoped;
       return scoped.filter((row) => indexes.every((index) => executionNonEmpty(row.values[index])));
     }
+    function systemRowObjectsSnapshotSignature(rows, maxSamples = 512) {
+      const source = Array.isArray(rows) ? rows : [];
+      const count = source.length;
+      const sampleCount = Math.min(count, Math.max(1, Number(maxSamples) || 512));
+      const indices = sampleCount >= count
+        ? Array.from({ length: count }, (_, index) => index)
+        : Array.from({ length: sampleCount }, (_, index) => Math.min(count - 1, Math.floor(index * (count - 1) / Math.max(1, sampleCount - 1))));
+      let hash = 2166136261;
+      let maxCols = 0;
+      indices.forEach((rowIndex) => {
+        const values = Array.isArray(source[rowIndex]?.values) ? source[rowIndex].values : (Array.isArray(source[rowIndex]) ? source[rowIndex] : []);
+        maxCols = Math.max(maxCols, values.length);
+        values.forEach((value) => {
+          const text = String(value instanceof Date ? value.toISOString() : value ?? "");
+          for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619) >>> 0;
+          hash = Math.imul(hash ^ 31, 16777619) >>> 0;
+        });
+        hash = Math.imul(hash ^ rowIndex, 16777619) >>> 0;
+      });
+      return `${count}:${maxCols}:${hash.toString(16).padStart(8, "0")}`;
+    }
+
+    function executionDataSnapshotSignature(plan = executionSelectedPlan()) {
+      return plan ? systemRowObjectsSnapshotSignature(executionRows(plan)) : "";
+    }
+
     function executionDataSignature(plan) {
       const sheet = executionSheet(plan);
       if (!sheet) return "";
@@ -21029,6 +21689,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
           artifactKey: executionArtifactKey(plan.id, executionState.projectId),
           planSignature: executionPlanSignature(plan),
           dataSignature: executionDataSignature(plan),
+          dataSnapshotSignature: executionDataSnapshotSignature(plan),
           runId: `RUN-${runAt.replace(/\D/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
           runAt,
           source: executionState.generatedCode ? "analysis_execution_with_ai_artifact" : "analysis_execution_builtin",
@@ -21156,6 +21817,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     const REPORT_STORE_NAME = "projects";
     const reportState = {
       projectId: null,
+      projects: [],
       plans: [],
       dataFiles: [],
       selectedPlanId: null,
@@ -21165,7 +21827,8 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       db: null,
       saveTimer: null,
       running: false,
-      aiRunning: false
+      aiRunning: false,
+      repositoryRevisions: { info: 0, dashboard: 0, analysis: 0, execution: 0, report: 0 }
     };
 
     const reportElements = {
@@ -21220,7 +21883,10 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       const date = new Date(value);
       return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN", { hour12: false });
     }
-    function reportProjectList() { return analysisProjectList(); }
+    function reportProjectList() {
+      if (Array.isArray(reportState.projects) && reportState.projects.length) return reportState.projects;
+      return analysisProjectList();
+    }
     function reportProject() { return reportProjectList().find((item) => item.id === reportState.projectId) || null; }
     function reportPlan() { return reportState.plans.find((item) => item.id === reportState.selectedPlanId) || null; }
     function reportArtifactKey(projectId = reportState.projectId, planId = reportState.selectedPlanId) { return projectId && planId ? `${projectId}::${planId}` : ""; }
@@ -21237,7 +21903,9 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       const plan = reportPlan();
       if (!execution?.result || !plan) return false;
       if (execution.planSignature && execution.planSignature !== reportPlanSignature(plan)) return false;
-      if (execution.source === "report_generated_code" && execution.dataSignature && execution.dataSignature !== reportDataSnapshotSignature(plan)) return false;
+      const currentSnapshot = reportDataSnapshotSignature(plan);
+      if (execution.dataSnapshotSignature && execution.dataSnapshotSignature !== currentSnapshot) return false;
+      if (execution.source === "report_generated_code" && execution.dataSignature && execution.dataSignature !== currentSnapshot) return false;
       return true;
     }
     function reportMethodLabel(plan = reportPlan()) {
@@ -21288,19 +21956,18 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
         subjectValues: plan.subjectValues || [],
         subjectColumns: plan.subjectColumns || [],
         restrictions: plan.restrictions || [],
-        missingPolicy: plan.missingPolicy || reportState.executionWorkspace?.missingPolicy || "listwise"
+        missingPolicy: plan.missingPolicy || reportState.executionWorkspace?.missingPolicy || "listwise",
+        chartMode: plan.chartMode || "auto",
+        charts: plan.charts || [],
+        chartConfigs: plan.chartConfigs || {},
+        chartConfigOverrides: plan.chartConfigOverrides || {},
+        tableFormat: plan.tableFormat || "three_line",
+        chartNote: plan.chartNote || ""
       });
     }
 
     function reportDataSnapshotSignature(plan = reportPlan()) {
-      const rows = reportRows(plan);
-      let hash = 2166136261;
-      rows.forEach((row) => row.values.forEach((value) => {
-        const text = String(value instanceof Date ? value.toISOString() : value ?? "");
-        for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619) >>> 0;
-        hash = Math.imul(hash ^ 31, 16777619) >>> 0;
-      }));
-      return `${rows.length}:${rows.reduce((max, row) => Math.max(max, Array.isArray(row?.values) ? row.values.length : 0), 0)}:${hash.toString(16).padStart(8, "0")}`;
+      return plan ? systemRowObjectsSnapshotSignature(reportRows(plan)) : "";
     }
 
     function reportOpenDb() {
@@ -21410,11 +22077,24 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     }
 
     async function reportRefreshProjectOptions(preferredId = null) {
-      const projects = reportProjectList();
-      const previous = preferredId || reportState.projectId || localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY) || "";
-      reportElements.projectSelect.innerHTML = '<option value="">请选择项目</option>' + projects.map((project) => `<option value="${reportEscape(project.id)}">${reportEscape(project.name)} · ${reportEscape(project.id)}</option>`).join("");
-      reportElements.projectSelect.value = projects.some((project) => project.id === previous) ? previous : "";
+      const inMemory = analysisProjectList();
+      let repositoryInfos = [];
+      try { repositoryInfos = await window.projectRepository.listInfos(); } catch (error) {}
+      const merged = new Map();
+      [...(Array.isArray(inMemory) ? inMemory : []), ...(Array.isArray(repositoryInfos) ? repositoryInfos : [])].forEach((project) => {
+        if (!project?.id) return;
+        const location = project.location || "active";
+        if (["trash", "archived"].includes(location)) return;
+        merged.set(project.id, { ...merged.get(project.id), ...project, location: "active" });
+      });
+      reportState.projects = [...merged.values()].sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
+      const projects = reportState.projects;
+      const previous = preferredId || reportState.projectId || reportElements.projectSelect.value || localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY) || "";
+      const selected = projects.some((project) => project.id === previous) ? previous : (projects[0]?.id || "");
+      reportElements.projectSelect.innerHTML = '<option value="">请选择项目</option>' + projects.map((project) => `<option value="${reportEscape(project.id)}">${reportEscape(project.name || "未命名项目")} · ${reportEscape(project.id)}</option>`).join("");
+      reportElements.projectSelect.value = selected;
       reportUpdateGate();
+      return selected;
     }
     window.reportRefreshProjectOptions = reportRefreshProjectOptions;
 
@@ -21436,15 +22116,17 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       reportState.currentReport = null;
       if (projectId) {
         localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectId);
-        const [plans, dataFiles, executionWorkspace, reportWorkspace] = await Promise.all([
+        const [plans, dataFiles, executionWorkspace, reportWorkspace, repositoryRecord] = await Promise.all([
           executionLoadPlans(projectId),
           executionLoadData(projectId),
           executionReadWorkspace(projectId).catch(() => null),
-          reportReadWorkspace(projectId).catch(() => null)
+          reportReadWorkspace(projectId).catch(() => null),
+          window.projectRepository.get(projectId).catch(() => null)
         ]);
         reportState.plans = plans;
         reportState.dataFiles = dataFiles;
         reportState.executionWorkspace = executionWorkspace || { projectId, planArtifacts: {}, planRuns: {} };
+        reportState.repositoryRevisions = repositoryRecord?.revisions || { info: 0, dashboard: 0, analysis: 0, execution: 0, report: 0 };
         reportState.workspace = reportWorkspace && reportWorkspace.projectId === projectId
           ? reportWorkspace
           : { projectId, selectedPlanId: null, planReports: {} };
@@ -21458,17 +22140,26 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     }
 
     async function reportRefreshContext(showMessage = true) {
-      if (!reportState.projectId) return;
-      const projectId = reportState.projectId, selectedPlanId = reportState.selectedPlanId;
-      const [plans, dataFiles, executionWorkspace, reportWorkspace] = await Promise.all([
+      const projectId = reportState.projectId || reportElements.projectSelect.value || "";
+      if (!projectId) {
+        const selected = await reportRefreshProjectOptions();
+        if (selected) return reportSwitchProject(selected);
+        reportRenderAll();
+        return;
+      }
+      if (reportState.projectId !== projectId) return reportSwitchProject(projectId);
+      const selectedPlanId = reportState.selectedPlanId;
+      const [plans, dataFiles, executionWorkspace, reportWorkspace, repositoryRecord] = await Promise.all([
         executionLoadPlans(projectId),
         executionLoadData(projectId),
         executionReadWorkspace(projectId).catch(() => null),
-        reportReadWorkspace(projectId).catch(() => null)
+        reportReadWorkspace(projectId).catch(() => null),
+        window.projectRepository.get(projectId).catch(() => null)
       ]);
       reportState.plans = plans;
       reportState.dataFiles = dataFiles;
       reportState.executionWorkspace = executionWorkspace || { projectId, planArtifacts: {}, planRuns: {} };
+      reportState.repositoryRevisions = repositoryRecord?.revisions || { info: 0, dashboard: 0, analysis: 0, execution: 0, report: 0 };
       reportState.workspace = reportWorkspace && reportWorkspace.projectId === projectId
         ? reportWorkspace
         : (reportState.workspace?.projectId === projectId ? reportState.workspace : { projectId, selectedPlanId: null, planReports: {} });
@@ -21501,10 +22192,21 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       const current = reportEnsureCurrentReport();
       if (!current) return;
       const savedRun = reportSavedExecutionRun();
-      if (!current.execution && savedRun?.result && (!savedRun.planSignature || savedRun.planSignature === reportPlanSignature(plan))) {
-        current.execution = reportClone(savedRun);
-        current.status = current.ai?.generatedAt ? "报告已生成" : "结果已保存";
-        reportSyncContentFromExecution(false);
+      const savedRunValid = Boolean(savedRun?.result && (!savedRun.planSignature || savedRun.planSignature === reportPlanSignature(plan)));
+      const currentIsAnalysisRun = Boolean(current.execution && current.execution.source !== "report_generated_code");
+      if (savedRunValid) {
+        const runChanged = !current.execution || current.execution.runId !== savedRun.runId || current.execution.runAt !== savedRun.runAt;
+        if (runChanged) {
+          current.execution = reportClone(savedRun);
+          current.status = current.ai?.generatedAt ? "报告已生成" : "结果已保存";
+          current.ai = null;
+          reportSyncContentFromExecution(false);
+        }
+      } else if (currentIsAnalysisRun || (current.execution && !reportExecutionFresh(current.execution))) {
+        current.execution = null;
+        current.ai = null;
+        current.status = "项目数据或方案已更新，需重新执行";
+        current.updatedAt = new Date().toISOString();
       }
       reportState.workspace.selectedPlanId = plan.id;
     }
@@ -21655,27 +22357,172 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       return aggregate();
     }
 
+    function reportChartTemplateConfig(plan, code) {
+      const source = plan?.chartConfigs?.[code] && typeof plan.chartConfigs[code] === "object" ? reportClone(plan.chartConfigs[code]) : {};
+      const savedTemplate = typeof window.getChartTemplateConfig === "function" ? (window.getChartTemplateConfig(code) || {}) : {};
+      const systemTemplate = typeof knowledgeDefaultChartConfig === "function" ? knowledgeDefaultChartConfig(code) : {};
+      const merged = { ...systemTemplate, ...savedTemplate, ...source };
+      const config = typeof knowledgeNormalizeChartConfig === "function"
+        ? knowledgeNormalizeChartConfig(code, merged)
+        : merged;
+      config.chartName = String(config.chartName || analysisChartLabel(code));
+      config.title = String(config.title || config.chartName || analysisChartLabel(code));
+      config.subtitle = String(config.subtitle || "");
+      return reportClone(config);
+    }
+
+    function reportTemplateChartData(code, plan, config) {
+      const rows = executionPrepareRows(plan, reportRows(plan));
+      const descriptor = (id) => reportChartFieldDescriptor(plan, id);
+      const dependent = [...new Set(plan?.dependentVars || [])].map(descriptor).filter(Boolean);
+      const independent = [...new Set(plan?.independentVars || [])].map(descriptor).filter(Boolean);
+      const groups = [...new Set(plan?.groupVars || [])].map(descriptor).filter(Boolean);
+      const time = descriptor(plan?.timeVar);
+      const allFields = [...dependent, ...independent].filter((field, index, array) => array.findIndex((item) => item.id === field.id) === index);
+      const numericFields = allFields.filter((field) => rows.some((row) => Number.isFinite(executionNumeric(row?.values?.[field.index]))));
+      const categoricalDependent = dependent.find((field) => !rows.some((row) => Number.isFinite(executionNumeric(row?.values?.[field.index])))) || null;
+      const value = (row, field) => field && Array.isArray(row?.values) ? row.values[field.index] : undefined;
+      const text = (row, field) => String(value(row, field) == null ? "" : value(row, field));
+      const numbers = (sourceRows, field) => sourceRows.map((row) => executionNumeric(value(row, field))).filter(Number.isFinite);
+      const mean = (values) => values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : 0;
+      const unique = (field) => field ? [...new Set(rows.map((row) => text(row, field)).filter(Boolean))] : [];
+      const groupValues = groups.map((field) => ({ field, values: unique(field) }));
+      const timeValues = time ? unique(time) : [];
+      const outcomeValues = categoricalDependent ? unique(categoricalDependent) : [];
+      const fieldByLabel = new Map(allFields.map((field) => [String(field.label), field]));
+      const resolveSeries = (name) => {
+        for (const item of groupValues.slice().reverse()) if (item.values.includes(name)) return { kind: "filter", field: item.field, value: name };
+        if (fieldByLabel.has(name)) return { kind: "measure", field: fieldByLabel.get(name) };
+        if (outcomeValues.includes(name)) return { kind: "filter", field: categoricalDependent, value: name, count: true };
+        return null;
+      };
+      const resolveCategory = (name) => {
+        if (time && timeValues.includes(name)) return { kind: "filter", field: time, value: name };
+        for (const item of groupValues) if (item.values.includes(name)) return { kind: "filter", field: item.field, value: name };
+        if (fieldByLabel.has(name)) return { kind: "measure", field: fieldByLabel.get(name) };
+        if (outcomeValues.includes(name)) return { kind: "filter", field: categoricalDependent, value: name, count: true };
+        return null;
+      };
+      const applyDimension = (sourceRows, dim) => dim?.kind === "filter" ? sourceRows.filter((row) => text(row, dim.field) === String(dim.value)) : sourceRows;
+      const cell = (seriesName, categoryName) => {
+        const sdim = resolveSeries(seriesName), cdim = resolveCategory(categoryName);
+        let subset = applyDimension(applyDimension(rows, sdim), cdim);
+        const measure = sdim?.kind === "measure" ? sdim.field : (cdim?.kind === "measure" ? cdim.field : (numericFields[0] || dependent[0] || independent[0]));
+        if (sdim?.count || cdim?.count || !measure) return subset.length;
+        const values = numbers(subset, measure);
+        return values.length ? mean(values) : 0;
+      };
+      const categoryNames = config.categoryNames.slice(0, config.pointCount);
+      const seriesNames = config.seriesNames.slice(0, config.seriesCount);
+      const matrix = seriesNames.map((seriesName) => categoryNames.map((categoryName) => cell(seriesName, categoryName)));
+      const fallback = reportFallbackChartData(code, plan);
+
+      if (["bar", "horizontal_bar", "line", "area"].includes(code)) {
+        if (config.pointCount === 1 && config.seriesCount > 1 && config.legendVisible === false) {
+          return { labels: seriesNames, values: matrix.map((series) => Number(series[0]) || 0), displayMode: "series_on_axis" };
+        }
+        if (config.seriesCount > 1) return { labels: categoryNames, series: seriesNames.map((label, index) => ({ label, values: matrix[index] })) };
+        return { labels: categoryNames, values: matrix[0] || [] };
+      }
+      if (code === "stacked_bar") return { labels: categoryNames, series: seriesNames.map((label, index) => ({ label, values: matrix[index] })) };
+      if (["pie", "donut", "treemap", "waterfall"].includes(code)) return { labels: categoryNames, values: matrix[0] || [] };
+      if (code === "histogram") {
+        const sourceValues = Array.isArray(fallback?.values) ? fallback.values.slice(0, config.pointCount) : [];
+        while (sourceValues.length < config.pointCount) sourceValues.push(0);
+        return { labels: categoryNames, values: sourceValues };
+      }
+      if (code === "heatmap") {
+        const sourceMatrix = Array.isArray(fallback?.matrix) ? fallback.matrix : [];
+        const normalizedMatrix = seriesNames.map((seriesName, rowIndex) => {
+          const sourceRow = Array.isArray(sourceMatrix[rowIndex]) ? sourceMatrix[rowIndex].slice(0, config.pointCount) : [];
+          while (sourceRow.length < config.pointCount) sourceRow.push(Number(matrix[rowIndex]?.[sourceRow.length]) || 0);
+          return sourceRow;
+        });
+        return { xLabels: categoryNames, yLabels: seriesNames, matrix: normalizedMatrix };
+      }
+      if (code === "radar") return config.seriesCount > 1
+        ? { labels: categoryNames, series: seriesNames.map((label, index) => ({ label, values: matrix[index] })) }
+        : { labels: categoryNames, values: matrix[0] || [] };
+      if (["box", "violin"].includes(code)) {
+        const measure = numericFields[0] || dependent[0];
+        const seriesDimensions = seriesNames.map(resolveSeries);
+        const categoryDimensions = categoryNames.map(resolveCategory);
+        const groupsMatrix = categoryNames.map((categoryName, categoryIndex) => seriesNames.map((seriesName, seriesIndex) => {
+          let subset = rows;
+          subset = applyDimension(subset, categoryDimensions[categoryIndex]);
+          subset = applyDimension(subset, seriesDimensions[seriesIndex]);
+          return { label: config.pointCount === 1 && config.seriesCount > 1 ? seriesName : categoryName, seriesName, categoryName, values: numbers(subset, measure) };
+        }));
+        const flatGroups = config.pointCount === 1 && config.seriesCount > 1
+          ? (groupsMatrix[0] || [])
+          : config.seriesCount === 1
+            ? groupsMatrix.map((row) => row[0]).filter(Boolean)
+            : groupsMatrix.flat();
+        return flatGroups.some((item) => item?.values?.length) ? { groups: flatGroups, groupsMatrix } : fallback;
+      }
+      if (["scatter", "bubble"].includes(code)) {
+        const xField = independent[0] || numericFields[0], yField = dependent[0] || numericFields[1] || numericFields[0];
+        const sizeField = numericFields.find((field) => field.id !== xField?.id && field.id !== yField?.id);
+        const groupingField = groups[0];
+        const pointSeries = seriesNames.map((name) => {
+          const subset = groupingField && unique(groupingField).includes(name) ? rows.filter((row) => text(row, groupingField) === name) : rows;
+          const x = [], y = [], sizes = [];
+          subset.forEach((row) => {
+            const xv = executionNumeric(value(row, xField)), yv = executionNumeric(value(row, yField));
+            if (!Number.isFinite(xv) || !Number.isFinite(yv)) return;
+            x.push(xv); y.push(yv);
+            const sv = executionNumeric(value(row, sizeField)); sizes.push(Number.isFinite(sv) ? Math.abs(sv) : 1);
+          });
+          return { label: name, x, y, sizes };
+        }).filter((item) => item.x.length);
+        if (pointSeries.length) return { series: pointSeries, x: pointSeries[0].x, y: pointSeries[0].y, sizes: pointSeries[0].sizes };
+        return fallback;
+      }
+      return fallback;
+    }
+
+    function reportStrictChartIssue(chart, code) {
+      if (!chart || typeof chart !== "object") return "图表对象为空";
+      const config = chart.config || {};
+      if (!config.title || !Array.isArray(config.seriesNames) || !Array.isArray(config.categoryNames)) return "方案图表模板不完整";
+      if (["bar", "horizontal_bar", "line", "area", "histogram", "waterfall", "pie", "donut", "treemap"].includes(code)) {
+        const series = Array.isArray(chart.series) ? chart.series : [];
+        if (series.length) return series.some((item) => !Array.isArray(item.values) || item.values.length !== chart.labels.length) ? "系列数据与类别数量不一致" : "";
+        return !Array.isArray(chart.labels) || !Array.isArray(chart.values) || chart.labels.length !== chart.values.length || !chart.labels.length ? "类别与数值数量不一致" : "";
+      }
+      return executionChartContractIssue(chart, code);
+    }
+
     function reportNormalizeCharts(result, plan = reportPlan()) {
       const requested = reportRequestedChartCodes(plan);
       if (!requested.length) return [];
       const source = executionCollectChartOutputs(result || {});
-      const normalizedSource = source.filter(Boolean).map((rawChart, index) => {
-        const code = String(rawChart?.requestedType || rawChart?.chartCode || rawChart?.code || rawChart?.type || requested[index] || "");
-        return executionNormalizeChartContract(rawChart, code, index, plan?.chartConfigs?.[code] || {});
+      const sourceByCode = new Map();
+      source.filter(Boolean).forEach((rawChart, index) => {
+        const code = String(rawChart?.requestedType || rawChart?.chartCode || rawChart?.code || requested[index] || rawChart?.type || "");
+        if (code && !sourceByCode.has(code)) sourceByCode.set(code, rawChart);
       });
-      const used = new Set();
       return requested.map((code, index) => {
-        const sourceIndex = normalizedSource.findIndex((chart, chartIndex) => !used.has(chartIndex) && String(chart.requestedType || chart.type) === code);
-        if (sourceIndex >= 0) used.add(sourceIndex);
-        const raw = sourceIndex >= 0 ? normalizedSource[sourceIndex] : {};
-        let chart = executionNormalizeChartContract(raw, code, index, plan?.chartConfigs?.[code] || {});
-        let issue = executionChartContractIssue(chart, code);
-        if (issue) {
-          const fallback = reportFallbackChartData(code, plan);
-          chart = executionNormalizeChartContract({ ...raw, ...fallback, data: fallback }, code, index, plan?.chartConfigs?.[code] || {});
-          issue = executionChartContractIssue(chart, code);
-        }
-        return { ...chart, id: String(chart.id || `${code}_${index + 1}`), requestedType: code, type: code, title: String(chart.title || plan?.chartConfigs?.[code]?.chartName || plan?.chartConfigs?.[code]?.title || ANALYSIS_CHARTS.find(([item]) => item === code)?.[1] || `分析图表 ${index + 1}`), missing: Boolean(issue), validationIssue: issue || "" };
+        const config = reportChartTemplateConfig(plan, code);
+        const sourceChart = sourceByCode.get(code) || {};
+        const templateData = reportTemplateChartData(code, plan, config);
+        const chart = executionNormalizeChartContract({
+          ...sourceChart,
+          ...templateData,
+          data: templateData,
+          config: reportClone(config),
+          requestedType: code,
+          type: code,
+          title: config.title || config.chartName || analysisChartLabel(code)
+        }, code, index, config);
+        chart.config = reportClone(config);
+        chart.title = config.title || config.chartName || analysisChartLabel(code);
+        chart.subtitle = config.subtitle || "";
+        chart.requestedType = code;
+        chart.type = code;
+        chart.id = `${plan?.id || "plan"}::${code}::${index + 1}`;
+        const issue = reportStrictChartIssue(chart, code);
+        return { ...chart, missing: Boolean(issue), validationIssue: issue || "" };
       });
     }
 
@@ -21974,6 +22821,19 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       return reportChartSvg(chart);
     }
 
+    function reportChartDataSvgFromTemplate(chart) {
+      const code = String(chart?.requestedType || chart?.type || "bar");
+      const config = chart?.config && typeof chart.config === "object"
+        ? reportClone(chart.config)
+        : reportChartTemplateConfig(reportPlan(), code);
+      try {
+        return knowledgeRenderChartSvg(code, config, chart || {});
+      } catch (error) {
+        console.error("统一图表模板渲染失败", code, error);
+        return reportChartDataSvg(chart);
+      }
+    }
+
     function reportTableHtml(table) {
       const format = table.format === "three_line" ? "three-line" : "standard";
       const rows = Array.isArray(table.rows) ? table.rows : [];
@@ -21983,6 +22843,17 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       const body = `<tbody>${previewRows.map((row) => `<tr>${(row || []).map((value) => `<td>${reportEscape(value ?? "")}</td>`).join("")}</tr>`).join("")}</tbody>`;
       const note = rows.length > limit ? `<div class="large-data-window-note">预览前 ${limit.toLocaleString()} 行，共 ${rows.length.toLocaleString()} 行；完整结果仍保留在当前项目—方案中。</div>` : "";
       return `<div class="report-table-canvas"><table class="report-data-table ${format}">${head}${body}</table></div>${note}`;
+    }
+
+    function reportChartTemplateSignature(config = {}) {
+      const fields = ["chartName","title","subtitle","theme","aspect","legendVisible","legendPosition","xAxisVisible","yAxisVisible","horizontalGrid","verticalGrid","xAxisTitle","yAxisTitle","xAxisAuto","xAxisMin","xAxisMax","xAxisStep","yAxisAuto","yAxisMin","yAxisMax","yAxisStep","dataLabels","showMarkers","numberFormat","decimals","lineWidth","markerSize"];
+      const payload = fields.map((field) => `${field}=${JSON.stringify(config?.[field])}`).concat([
+        `seriesNames=${JSON.stringify(config?.seriesNames || [])}`,
+        `categoryNames=${JSON.stringify(config?.categoryNames || [])}`
+      ]).join("|");
+      let hash = 2166136261;
+      for (let index = 0; index < payload.length; index += 1) { hash ^= payload.charCodeAt(index); hash = Math.imul(hash, 16777619); }
+      return `tpl-${(hash >>> 0).toString(16)}`;
     }
 
     function reportRenderCharts() {
@@ -22007,14 +22878,15 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
         const chartLabel = ANALYSIS_CHARTS.find(([code]) => code === chart.requestedType)?.[1] || chart.type || "图表";
         const visual = chart.missing
           ? `<div class="report-chart-missing">当前执行结果缺少“${reportEscape(chartLabel)}”的数据对象。请在分析执行中重新生成并运行代码。</div>`
-          : `<div class="report-chart-canvas">${reportChartDataSvg(chart)}</div>`;
-        return `<article class="report-chart-pair"><div class="report-chart-visual"><div class="report-chart-subtitle"><strong>图 ${index + 1} · ${reportEscape(chart.title)}</strong><span class="report-visual-kind">${reportEscape(chartLabel)}</span></div>${visual}</div><div class="report-chart-copy"><div class="report-chart-subtitle"><strong>图表结果说明</strong><span>先说明图表呈现内容，再概括分布、差异、趋势或关系</span></div><textarea class="report-textarea report-editable" maxlength="12000" data-report-chart-description="${reportEscape(chart.id)}">${reportEscape(item.text || "")}</textarea></div></article>`;
+          : `<div class="report-chart-canvas" data-template-renderer="unified" data-chart-code="${reportEscape(chart.requestedType || chart.type || "")}" data-template-signature="${reportEscape(reportChartTemplateSignature(chart.config || {}))}">${reportChartDataSvgFromTemplate(chart)}</div>`;
+        const chartAspect = ["wide", "compact", "standard"].includes(chart.config?.aspect) ? chart.config.aspect : "wide";
+        return `<article class="report-chart-pair" data-chart-aspect="${reportEscape(chartAspect)}"><div class="report-chart-visual"><div class="report-chart-subtitle"><strong>图 ${index + 1} · ${reportEscape(chart.title)}</strong><span class="report-visual-kind">${reportEscape(chartLabel)}</span></div>${visual.replace('data-template-renderer="unified"', `data-template-renderer="unified" data-chart-aspect="${reportEscape(chartAspect)}"`)}</div><div class="report-chart-copy"><div class="report-chart-subtitle"><strong>图表结果说明</strong><span>先说明图表呈现内容，再概括分布、差异、趋势或关系</span></div><textarea class="report-textarea report-editable" maxlength="12000" data-report-chart-description="${reportEscape(chart.id)}">${reportEscape(item.text || "")}</textarea></div></article>`;
       };
 
       const groups = [];
       if (descriptiveTables.length) groups.push(`<section class="report-output-group"><div class="report-output-group-title"><strong>一、描述统计</strong><span>样本规模、集中趋势、离散程度和取值范围</span></div>${descriptiveTables.map((table, index) => tableBlock(table, index, "描述统计")).join("")}</section>`);
       if (analysisTables.length) groups.push(`<section class="report-output-group"><div class="report-output-group-title"><strong>二、分析结果</strong><span>统计检验、模型系数、效应量或结构结果</span></div>${analysisTables.map((table, index) => tableBlock(table, index, "分析结果")).join("")}</section>`);
-      if (charts.length) groups.push(`<section class="report-output-group"><div class="report-output-group-title"><strong>${descriptiveTables.length || analysisTables.length ? "三" : "一"}、图表呈现</strong><span>按方案勾选顺序展示 ${charts.length} 个图表</span></div>${charts.map(chartBlock).join("")}</section>`);
+      if (charts.length) groups.push(`<section class="report-output-group"><div class="report-output-group-title"><strong>${descriptiveTables.length || analysisTables.length ? "三" : "一"}、图表呈现</strong><span>严格按方案设计中的图表类型、顺序、系列、类别、图例和坐标轴模板展示 ${charts.length} 个图表</span></div>${charts.map(chartBlock).join("")}</section>`);
       reportElements.chartList.innerHTML = groups.length ? groups.join("") : '<div class="report-empty">当前方案未配置图表，且结果表格式设为“不生成结果表”。</div>';
     }
 
@@ -22594,8 +23466,26 @@ self.onmessage = async function(event) {
     });
 
     let reportRepositoryRefreshTimer = null;
+    let reportProjectIndexRefreshTimer = null;
+    async function reportRefreshProjectIndexAndSelection(preferredId = null) {
+      const selected = await reportRefreshProjectOptions(preferredId);
+      if (!selected) {
+        if (reportState.projectId) await reportSwitchProject("");
+        else reportRenderAll();
+        return;
+      }
+      if (reportState.projectId !== selected) await reportSwitchProject(selected);
+    }
+    window.addEventListener("dataAnalysisAgent:projects-index-updated", () => {
+      clearTimeout(reportProjectIndexRefreshTimer);
+      reportProjectIndexRefreshTimer = setTimeout(() => reportRefreshProjectIndexAndSelection(reportState.projectId).catch(console.warn), 80);
+    });
     window.addEventListener("dataAnalysisAgent:project-updated", (event) => {
       const detail = event.detail || {};
+      if (["info", "project"].includes(detail.section)) {
+        clearTimeout(reportProjectIndexRefreshTimer);
+        reportProjectIndexRefreshTimer = setTimeout(() => reportRefreshProjectIndexAndSelection(reportState.projectId).catch(console.warn), 80);
+      }
       if (!reportState.projectId || detail.projectId !== reportState.projectId) return;
       if (!["info", "dashboard", "analysis", "execution"].includes(detail.section)) return;
       clearTimeout(reportRepositoryRefreshTimer);
@@ -22603,8 +23493,7 @@ self.onmessage = async function(event) {
     });
 
     (async function initializeReport() {
-      await reportRefreshProjectOptions();
-      const preferred = reportElements.projectSelect?.value;
+      const preferred = await reportRefreshProjectOptions();
       if (preferred) await reportSwitchProject(preferred); else reportRenderAll();
     })();
 
@@ -22630,5 +23519,6 @@ self.onmessage = async function(event) {
     })();
   </script>
 
+  <meta name="data-analysis-system-build" content="v0.9.4-unified-chart-renderer" />
 </body>
 </html>
