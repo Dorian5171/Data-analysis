@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>数据分析系统 · v0.9.0</title>
+  <title>数据分析系统 · v0.9.1</title>
   <style>
     :root {
       --bg: #f5f8f6;
@@ -6774,6 +6774,86 @@
       }
     }
 
+
+    /* v0.9.1：大数据窗口化、AI上下文压缩与结果分页 */
+    .virtual-spacer-cell {
+      position: static !important;
+      left: auto !important;
+      min-width: 0 !important;
+      width: auto !important;
+      max-width: none !important;
+      height: 0;
+      padding: 0 !important;
+      border: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      pointer-events: none;
+    }
+
+    .large-data-window-note {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: 8px;
+      color: var(--green-700);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    .large-data-window-note::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green-500);
+    }
+
+    .result-table-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 7px;
+      margin-top: 9px;
+      color: var(--text-light);
+      font-size: 10px;
+    }
+
+    .result-table-pagination button {
+      min-height: 28px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .result-table-pagination button:disabled {
+      opacity: .42;
+      cursor: not-allowed;
+    }
+
+    .ai-context-meter {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-light);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    .ai-context-meter strong {
+      color: var(--green-800);
+      font-size: 10px;
+    }
+
+    .execution-result-table-card,
+    .report-chart-pair,
+    .dashboard-file-card {
+      content-visibility: auto;
+      contain-intrinsic-size: 220px;
+    }
+
 </style>
 </head>
 <body>
@@ -6783,7 +6863,7 @@
         <div class="brand-mark" aria-hidden="true"></div>
         <div class="brand-copy">
           <p class="brand-title">数据分析系统</p>
-          <div class="brand-version">Version 0.9.0</div>
+          <div class="brand-version">Version 0.9.1</div>
         </div>
       </div>
 
@@ -9495,6 +9575,14 @@
       preprocessFilter: null,
       preprocessUndoStack: [],
       preprocessRedoStack: [],
+      tableVirtualStart: 0,
+      preprocessVirtualStart: 0,
+      tableScrollFrame: 0,
+      preprocessScrollFrame: 0,
+      visibleRowCache: null,
+      preprocessVisibleRowCache: null,
+      lastRenderedSheetKey: "",
+      lastRenderedPreprocessTableId: "",
       saveTimer: null,
       db: null
     };
@@ -9584,6 +9672,7 @@
       preprocessRenameTable: document.getElementById("preprocessRenameTableButton"),
       preprocessNewTable: document.getElementById("preprocessNewTable"),
       preprocessDeleteTable: document.getElementById("preprocessDeleteTable"),
+      preprocessTableShell: document.getElementById("preprocessTableShell"),
       preprocessTable: document.getElementById("preprocessTable"),
       preprocessTableEmpty: document.getElementById("preprocessTableEmpty"),
       preprocessTableBody: document.getElementById("preprocessTableBody"),
@@ -9625,6 +9714,301 @@
       if (typeof structuredClone === "function") return structuredClone(value);
       return JSON.parse(JSON.stringify(value));
     }
+
+    const SYSTEM_LARGE_DATA_CONFIG = Object.freeze({
+      aiSoftChars: 420000,
+      aiHardChars: 900000,
+      profileSampleRows: 2048,
+      aiSampleRows: 24,
+      dashboardVirtualThreshold: 800,
+      dashboardVirtualOverscan: 24,
+      dashboardRowHeight: 34,
+      preprocessVirtualThreshold: 800,
+      resultPageSize: 200,
+      reportTablePreviewRows: 200,
+      chartAIPoints: 160,
+      chartStoragePoints: 1800,
+      maxIssueLocations: 1200
+    });
+
+    function systemArrayMin(values, fallback = 0) {
+      const source = Array.isArray(values) ? values : [];
+      let found = false;
+      let result = Infinity;
+      for (let index = 0; index < source.length; index += 1) {
+        const value = Number(source[index]);
+        if (!Number.isFinite(value)) continue;
+        found = true;
+        if (value < result) result = value;
+      }
+      return found ? result : fallback;
+    }
+
+    function systemArrayMax(values, fallback = 0) {
+      const source = Array.isArray(values) ? values : [];
+      let found = false;
+      let result = -Infinity;
+      for (let index = 0; index < source.length; index += 1) {
+        const value = Number(source[index]);
+        if (!Number.isFinite(value)) continue;
+        found = true;
+        if (value > result) result = value;
+      }
+      return found ? result : fallback;
+    }
+
+    function systemMaxRowLength(rows) {
+      const source = Array.isArray(rows) ? rows : [];
+      let max = 0;
+      for (let index = 0; index < source.length; index += 1) {
+        const length = Array.isArray(source[index]) ? source[index].length : 0;
+        if (length > max) max = length;
+      }
+      return max;
+    }
+
+    function systemResultForStorage(result) {
+      const source = result && typeof result === "object" ? result : {};
+      const compact = {};
+      Object.entries(source).forEach(([key, value]) => {
+        if (key === "effectiveRows") return;
+        if (key === "chart" && value) { compact.chart = systemCompactChartForAI(value, SYSTEM_LARGE_DATA_CONFIG.chartStoragePoints); return; }
+        if (key === "charts" && Array.isArray(value)) { compact.charts = value.map((chart) => systemCompactChartForAI(chart, SYSTEM_LARGE_DATA_CONFIG.chartStoragePoints)); return; }
+        if (key === "tables" && Array.isArray(value)) { compact.tables = value.map((table) => systemCompactTableForAI(table, 500)); return; }
+        compact[key] = value;
+      });
+      const rows = Array.isArray(source.effectiveRows) ? source.effectiveRows : [];
+      compact.effectiveRowCount = Number(source.effectiveRowCount) || rows.length;
+      if (rows.length) {
+        const indexes = systemDeterministicSampleIndices(rows.length, 8);
+        compact.effectiveRowsSample = indexes.map((index) => {
+          const row = rows[index];
+          return row && Array.isArray(row.values)
+            ? { __rowIndex: row.__rowIndex, values: row.values.slice(0, 80).map((value) => systemCompactValue(value, 80)) }
+            : row;
+        });
+      }
+      return compact;
+    }
+
+    function systemCompactValue(value, maxLength = 120) {
+      if (value === null || value === undefined) return "";
+      if (value instanceof Date) return value.toISOString();
+      if (typeof value === "number" || typeof value === "boolean") return value;
+      const text = String(value).replace(/\s+/g, " ").trim();
+      return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+    }
+
+    function systemDeterministicSampleIndices(total, limit = SYSTEM_LARGE_DATA_CONFIG.profileSampleRows) {
+      const count = Math.max(0, Number(total) || 0);
+      const size = Math.max(0, Math.min(count, Number(limit) || 0));
+      if (!size) return [];
+      if (count <= size) return Array.from({ length: count }, (_, index) => index);
+      const indexes = new Set([0, count - 1, Math.floor(count / 2)]);
+      const step = (count - 1) / Math.max(1, size - 1);
+      for (let index = 0; index < size; index += 1) indexes.add(Math.min(count - 1, Math.round(index * step)));
+      return [...indexes].sort((a, b) => a - b).slice(0, size);
+    }
+
+    function systemDownsampleArray(values, limit = SYSTEM_LARGE_DATA_CONFIG.chartAIPoints) {
+      const source = Array.isArray(values) ? values : [];
+      if (source.length <= limit) return source.map((value) => systemCompactValue(value, 160));
+      return systemDeterministicSampleIndices(source.length, limit).map((index) => systemCompactValue(source[index], 160));
+    }
+
+    function systemProfileRows(headers, rows, options = {}) {
+      const names = Array.isArray(headers) ? headers.map((value, index) => String(value || `字段_${index + 1}`)) : [];
+      const sourceRows = Array.isArray(rows) ? rows : [];
+      const valueAccessor = typeof options.valueAccessor === "function" ? options.valueAccessor : ((row, column) => row?.[column]);
+      const profileIndexes = systemDeterministicSampleIndices(sourceRows.length, options.profileLimit || SYSTEM_LARGE_DATA_CONFIG.profileSampleRows);
+      const sampleIndexes = systemDeterministicSampleIndices(sourceRows.length, options.sampleLimit || SYSTEM_LARGE_DATA_CONFIG.aiSampleRows);
+      const fields = names.map((name, columnIndex) => {
+        let nonEmpty = 0;
+        let numericCount = 0;
+        let sum = 0;
+        let min = Infinity;
+        let max = -Infinity;
+        const unique = new Set();
+        const sampleValues = [];
+        profileIndexes.forEach((rowIndex) => {
+          const raw = valueAccessor(sourceRows[rowIndex], columnIndex);
+          const compact = systemCompactValue(raw, 100);
+          if (compact === "") return;
+          nonEmpty += 1;
+          if (unique.size < 240) unique.add(String(compact));
+          if (sampleValues.length < 8 && !sampleValues.includes(compact)) sampleValues.push(compact);
+          const number = typeof raw === "number" ? raw : Number(String(raw).replace(/,/g, ""));
+          if (Number.isFinite(number)) {
+            numericCount += 1;
+            sum += number;
+            min = Math.min(min, number);
+            max = Math.max(max, number);
+          }
+        });
+        const sampled = profileIndexes.length;
+        const numericRatio = nonEmpty ? numericCount / nonEmpty : 0;
+        return {
+          index: columnIndex,
+          name,
+          sampled_rows: sampled,
+          non_empty_sampled: nonEmpty,
+          missing_ratio_approx: sampled ? Number(((sampled - nonEmpty) / sampled).toFixed(4)) : 0,
+          unique_count_approx: unique.size >= 240 ? "240+" : unique.size,
+          sample_values: sampleValues,
+          numeric_summary: numericRatio >= 0.7 && numericCount ? {
+            numeric_ratio: Number(numericRatio.toFixed(4)),
+            min,
+            max,
+            mean: sum / numericCount
+          } : null
+        };
+      });
+      return {
+        row_count: sourceRows.length,
+        column_count: names.length,
+        headers: names,
+        profile_basis: profileIndexes.length,
+        fields,
+        sample_rows: sampleIndexes.map((rowIndex) => names.map((_, columnIndex) => systemCompactValue(valueAccessor(sourceRows[rowIndex], columnIndex), 120)))
+      };
+    }
+
+    function systemJsonSize(value) {
+      try { return new Blob([JSON.stringify(value)]).size; }
+      catch (error) { return String(JSON.stringify(value) || "").length; }
+    }
+
+    function systemFormatBytes(bytes) {
+      const value = Math.max(0, Number(bytes) || 0);
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      return `${(value / 1024 / 1024).toFixed(2)} MB`;
+    }
+
+    function systemQuantileApprox(values, probability) {
+      const source = Array.isArray(values) ? values.map(Number).filter(Number.isFinite) : [];
+      if (!source.length) return null;
+      const sampled = source.length > 4096 ? systemDeterministicSampleIndices(source.length, 4096).map((index) => source[index]) : source.slice();
+      sampled.sort((a, b) => a - b);
+      const position = (sampled.length - 1) * probability;
+      const lower = Math.floor(position), upper = Math.ceil(position);
+      if (lower === upper) return sampled[lower];
+      return sampled[lower] + (sampled[upper] - sampled[lower]) * (position - lower);
+    }
+
+    function systemCompactTableForAI(table, maxRows = 80) {
+      const columns = Array.isArray(table?.columns) ? table.columns.map(String) : [];
+      const rows = Array.isArray(table?.rows) ? table.rows : [];
+      const indexes = systemDeterministicSampleIndices(rows.length, Math.min(maxRows, rows.length));
+      return {
+        id: String(table?.id || ""),
+        kind: String(table?.kind || ""),
+        title: String(table?.title || "结果表"),
+        description: String(table?.description || ""),
+        format: String(table?.format || "standard"),
+        columns,
+        row_count: rows.length,
+        rows: indexes.map((index) => (Array.isArray(rows[index]) ? rows[index] : [rows[index]]).map((value) => systemCompactValue(value, 140))),
+        profile: systemProfileRows(columns, rows, { profileLimit: Math.min(1024, rows.length), sampleLimit: 0 })
+      };
+    }
+
+    function systemCompactChartForAI(chart, maxPoints = SYSTEM_LARGE_DATA_CONFIG.chartAIPoints) {
+      const source = chart && typeof chart === "object" ? chart : {};
+      const compact = {
+        id: String(source.id || ""),
+        title: String(source.title || "图表"),
+        type: String(source.requestedType || source.type || source.chartCode || ""),
+        requestedType: String(source.requestedType || source.type || source.chartCode || ""),
+        config: source.config && typeof source.config === "object" ? source.config : {}
+      };
+      ["labels", "categories", "values", "x", "y", "sizes", "size", "outcomes", "fitted", "xLabels", "yLabels"].forEach((key) => {
+        if (Array.isArray(source[key])) compact[key] = systemDownsampleArray(source[key], maxPoints);
+      });
+      if (Array.isArray(source.series)) compact.series = source.series.slice(0, 24).map((item) => ({
+        label: String(item?.label || item?.name || "系列"),
+        values: systemDownsampleArray(item?.values || [], maxPoints),
+        x: systemDownsampleArray(item?.x || [], maxPoints),
+        y: systemDownsampleArray(item?.y || [], maxPoints)
+      }));
+      if (Array.isArray(source.groups)) compact.groups = source.groups.slice(0, 40).map((group) => {
+        const values = Array.isArray(group?.values) ? group.values.map(Number).filter(Number.isFinite) : [];
+        return {
+          label: String(group?.label || "组别"),
+          n: Number(group?.n) || values.length,
+          min: Number.isFinite(Number(group?.min)) ? Number(group.min) : (values.length ? systemArrayMin(values, null) : null),
+          q1: Number.isFinite(Number(group?.q1)) ? Number(group.q1) : systemQuantileApprox(values, .25),
+          median: Number.isFinite(Number(group?.median)) ? Number(group.median) : systemQuantileApprox(values, .5),
+          q3: Number.isFinite(Number(group?.q3)) ? Number(group.q3) : systemQuantileApprox(values, .75),
+          max: Number.isFinite(Number(group?.max)) ? Number(group.max) : (values.length ? systemArrayMax(values, null) : null),
+          iqr: Number.isFinite(Number(group?.iqr)) ? Number(group.iqr) : null,
+          lowerFence: Number.isFinite(Number(group?.lowerFence)) ? Number(group.lowerFence) : null,
+          upperFence: Number.isFinite(Number(group?.upperFence)) ? Number(group.upperFence) : null,
+          lowerWhisker: Number.isFinite(Number(group?.lowerWhisker)) ? Number(group.lowerWhisker) : null,
+          upperWhisker: Number.isFinite(Number(group?.upperWhisker)) ? Number(group.upperWhisker) : null,
+          outliers: systemDownsampleArray(group?.outliers || [], 80),
+          outlier_count: Array.isArray(group?.outliers) ? group.outliers.length : null,
+          sample_values: systemDownsampleArray(values, 24)
+        };
+      });
+      if (Array.isArray(source.matrix)) {
+        const rowIndexes = systemDeterministicSampleIndices(source.matrix.length, Math.min(30, source.matrix.length));
+        compact.matrix = rowIndexes.map((rowIndex) => systemDownsampleArray(source.matrix[rowIndex], 30));
+      }
+      const data = source.data && typeof source.data === "object" ? source.data : null;
+      if (data) {
+        const dataCompact = systemCompactChartForAI({ ...data, id: compact.id, title: compact.title, type: compact.type, config: {} }, maxPoints);
+        delete dataCompact.id; delete dataCompact.title; delete dataCompact.type; delete dataCompact.requestedType; delete dataCompact.config;
+        compact.data = dataCompact;
+      }
+      compact.point_count = Math.max(
+        Array.isArray(source.values) ? source.values.length : 0,
+        Array.isArray(source.x) ? source.x.length : 0,
+        Array.isArray(source.y) ? source.y.length : 0
+      );
+      return compact;
+    }
+
+    function systemCompactExecutionResult(result, options = {}) {
+      const source = result && typeof result === "object" ? result : {};
+      const effectiveRows = Array.isArray(source.effectiveRows) ? source.effectiveRows : [];
+      const compact = {};
+      Object.entries(source).forEach(([key, value]) => {
+        if (["effectiveRows", "charts", "chart", "tables"].includes(key)) return;
+        compact[key] = value;
+      });
+      compact.effectiveRowCount = Number(source.effectiveRowCount) || effectiveRows.length;
+      if (effectiveRows.length) {
+        const indexes = systemDeterministicSampleIndices(effectiveRows.length, 12);
+        compact.effectiveRowsSample = indexes.map((index) => {
+          const row = effectiveRows[index];
+          return row && Array.isArray(row.values)
+            ? { __rowIndex: row.__rowIndex, values: row.values.map((value) => systemCompactValue(value, 80)) }
+            : row;
+        });
+      }
+      const chartLimit = options.storage ? SYSTEM_LARGE_DATA_CONFIG.chartStoragePoints : SYSTEM_LARGE_DATA_CONFIG.chartAIPoints;
+      if (Array.isArray(source.charts)) compact.charts = source.charts.map((chart) => systemCompactChartForAI(chart, chartLimit));
+      else if (source.chart) compact.chart = systemCompactChartForAI(source.chart, chartLimit);
+      if (Array.isArray(source.tables)) compact.tables = source.tables.map((table) => systemCompactTableForAI(table, options.storage ? 500 : 80));
+      return compact;
+    }
+
+    window.SystemLargeDataUtils = Object.freeze({
+      config: SYSTEM_LARGE_DATA_CONFIG,
+      compactValue: systemCompactValue,
+      sampleIndices: systemDeterministicSampleIndices,
+      profileRows: systemProfileRows,
+      jsonSize: systemJsonSize,
+      formatBytes: systemFormatBytes,
+      compactTableForAI: systemCompactTableForAI,
+      compactChartForAI: systemCompactChartForAI,
+      compactExecutionResult: systemCompactExecutionResult,
+      arrayMin: systemArrayMin,
+      arrayMax: systemArrayMax,
+      maxRowLength: systemMaxRowLength,
+      resultForStorage: systemResultForStorage
+    });
 
     function dashboardEscape(value) {
       return String(value ?? "")
@@ -9691,7 +10075,7 @@
     }
 
     function dashboardMaxColumns(sheet) {
-      const rowMax = Math.max(0, ...sheet.rows.map((row) => row.length));
+      const rowMax = systemMaxRowLength(sheet.rows);
       const mergeMax = Math.max(0, ...sheet.merges.map((merge) => merge.e.c + 1));
       return Math.max(rowMax, mergeMax);
     }
@@ -10570,7 +10954,21 @@
       return type ? `issue-${type}` : "";
     }
 
-    function dashboardRenderTable() {
+    function dashboardVirtualRange(totalRows, shell, rowHeight, overscan) {
+      const viewport = Math.max(rowHeight * 8, shell?.clientHeight || 520);
+      const scrollTop = Math.max(0, (shell?.scrollTop || 0) - rowHeight);
+      const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+      const visible = Math.ceil(viewport / rowHeight) + overscan * 2;
+      return { start, end: Math.min(totalRows, start + visible) };
+    }
+
+    function dashboardScrollToRow(rowIndex) {
+      const row = Math.max(1, Number(rowIndex) || 1);
+      dashboardElements.tableShell.scrollTop = Math.max(0, (row - 1) * SYSTEM_LARGE_DATA_CONFIG.dashboardRowHeight);
+      dashboardRenderTable({ fromScroll: true, force: true });
+    }
+
+    function dashboardRenderTable(options = {}) {
       const sheet = dashboardCurrentSheet();
       if (!sheet) {
         dashboardElements.table.hidden = true;
@@ -10580,15 +10978,39 @@
         dashboardElements.body.innerHTML = "";
         dashboardElements.dimension.textContent = "0 行 × 0 列";
         dashboardElements.description.textContent = "导入数据后，可直接在单元格中修改并自动保存";
+        dashboardState.visibleRowCache = null;
         return;
       }
+      const sheetKey = `${dashboardState.activeFileId || ""}::${dashboardState.activeSheetId || ""}`;
+      if (dashboardState.lastRenderedSheetKey !== sheetKey) {
+        dashboardState.lastRenderedSheetKey = sheetKey;
+        dashboardState.tableVirtualStart = 0;
+        dashboardState.visibleRowCache = null;
+        dashboardElements.tableShell.scrollTop = 0;
+      }
       const maxCols = dashboardMaxColumns(sheet);
-      const rowIndexes = dashboardVisibleRowIndexes(sheet);
+      let dataRows;
+      const filterKey = dashboardState.filter ? JSON.stringify(dashboardState.filter) : "";
+      const cacheKey = `${sheetKey}|${filterKey}|${sheet.rows.length}`;
+      if (!dashboardState.filter) {
+        dataRows = null;
+      } else if (options.fromScroll && dashboardState.visibleRowCache?.key === cacheKey) {
+        dataRows = dashboardState.visibleRowCache.rows;
+      } else {
+        dataRows = dashboardVisibleRowIndexes(sheet).filter((rowIndex) => rowIndex > 0);
+        dashboardState.visibleRowCache = { key: cacheKey, rows: dataRows };
+      }
+      const dataCount = dataRows ? dataRows.length : Math.max(0, sheet.rows.length - 1);
+      const virtual = dataCount > SYSTEM_LARGE_DATA_CONFIG.dashboardVirtualThreshold;
+      const range = virtual
+        ? dashboardVirtualRange(dataCount, dashboardElements.tableShell, SYSTEM_LARGE_DATA_CONFIG.dashboardRowHeight, SYSTEM_LARGE_DATA_CONFIG.dashboardVirtualOverscan)
+        : { start: 0, end: dataCount };
+      if (options.fromScroll && !options.force && virtual && range.start === dashboardState.tableVirtualStart) return;
+      dashboardState.tableVirtualStart = range.start;
       const { starts, covered } = dashboardMergeMaps(sheet);
       const query = dashboardState.search.trim().toLowerCase();
-      const rowsHtml = rowIndexes.map((r) => {
-        const cells = [];
-        cells.push(`<th class="dashboard-row-index">${r + 1}</th>`);
+      const renderRow = (r) => {
+        const cells = [`<th class="dashboard-row-index">${r + 1}</th>`];
         for (let c = 0; c < maxCols; c += 1) {
           const key = `${r},${c}`;
           if (covered.has(key)) continue;
@@ -10620,15 +11042,26 @@
           cells.push(`<${tag} ${attributes.join(" ")}>${dashboardEscape(value)}</${tag}>`);
         }
         return `<tr data-row="${r}">${cells.join("")}</tr>`;
-      }).join("");
+      };
+      const visibleRows = [];
+      for (let position = range.start; position < range.end; position += 1) visibleRows.push(dataRows ? dataRows[position] : position + 1);
+      const spacer = (height, name) => height > 0
+        ? `<tr aria-hidden="true" data-virtual-spacer="${name}"><td class="virtual-spacer-cell" colspan="${maxCols + 1}" style="height:${height}px"></td></tr>`
+        : "";
+      const rowsHtml = [
+        renderRow(0),
+        virtual ? spacer(range.start * SYSTEM_LARGE_DATA_CONFIG.dashboardRowHeight, "top") : "",
+        ...visibleRows.map(renderRow),
+        virtual ? spacer((dataCount - range.end) * SYSTEM_LARGE_DATA_CONFIG.dashboardRowHeight, "bottom") : ""
+      ].join("");
       dashboardElements.body.innerHTML = rowsHtml;
       dashboardElements.table.hidden = false;
       dashboardElements.table.style.display = "table";
       dashboardElements.tableEmpty.hidden = true;
       dashboardElements.tableEmpty.style.display = "none";
-      dashboardElements.dimension.textContent = `${Math.max(0, sheet.rows.length - 1)} 行 × ${maxCols} 列`;
-      const filterText = dashboardState.filter ? `，当前筛选显示 ${Math.max(0, rowIndexes.length - 1)} 行` : "";
-      dashboardElements.description.textContent = `${dashboardCurrentFile().name} / ${sheet.logicalName}${filterText}`;
+      dashboardElements.dimension.innerHTML = `${Math.max(0, sheet.rows.length - 1)} 行 × ${maxCols} 列${virtual ? `<span class="large-data-window-note">窗口化显示 ${range.start + 1}-${range.end} / ${dataCount}</span>` : ""}`;
+      const filterText = dashboardState.filter ? `，当前筛选显示 ${dataCount} 行` : "";
+      dashboardElements.description.textContent = `${dashboardCurrentFile().name} / ${sheet.logicalName}${filterText}${virtual ? " · 已启用大数据窗口渲染，编辑与导出仍作用于全量数据" : ""}`;
       dashboardUpdateToolbarState();
     }
 
@@ -10666,7 +11099,10 @@
 
     function dashboardPushAction(action) {
       dashboardState.undoStack.push(action);
-      if (dashboardState.undoStack.length > 40) dashboardState.undoStack.shift();
+      const rows = action?.before?.rows || action?.after?.rows || [];
+      const largeAction = action?.type === "sheet" && rows.length * Math.max(1, systemMaxRowLength(rows)) > 500000;
+      const limit = largeAction ? 2 : 40;
+      if (dashboardState.undoStack.length > limit) dashboardState.undoStack.splice(0, dashboardState.undoStack.length - limit);
       dashboardState.redoStack = [];
       dashboardUpdateToolbarState();
       dashboardScheduleSave();
@@ -10859,18 +11295,35 @@
       return `${unique.slice(0, 5).map((item) => dashboardEncodeCellRef(item.r, item.c)).join("、")} 等 ${unique.length} 处`;
     }
 
-    function dashboardAddFinding(type, locations, detail, meta = {}) {
-      if (!locations.length) return;
+    function dashboardLocationCollector(limit = SYSTEM_LARGE_DATA_CONFIG.maxIssueLocations) {
+      return {
+        total: 0,
+        locations: [],
+        add(r, c) {
+          this.total += 1;
+          if (this.locations.length < limit) this.locations.push({ r, c });
+        }
+      };
+    }
+
+    async function dashboardYieldToUI(index, every = 5000) {
+      if (index > 0 && index % every === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    function dashboardAddFinding(type, locations, detail, meta = {}, totalCount = null) {
+      const total = Number.isFinite(Number(totalCount)) ? Number(totalCount) : locations.length;
+      if (!total) return;
       const definition = dashboardIssueDefinitions[type];
-      dashboardState.findings.push({ id: dashboardId("issue"), type, locations, detail, meta });
-      locations.forEach(({ r, c }) => {
+      const sampled = locations.slice(0, SYSTEM_LARGE_DATA_CONFIG.maxIssueLocations);
+      dashboardState.findings.push({ id: dashboardId("issue"), type, locations: sampled, totalCount: total, detail, meta });
+      sampled.forEach(({ r, c }) => {
         const key = `${r},${c}`;
         dashboardState.highlights[key] ||= [];
         if (!dashboardState.highlights[key].includes(definition.highlight)) dashboardState.highlights[key].push(definition.highlight);
       });
     }
 
-    function dashboardRunAnomalyChecks() {
+    async function dashboardRunAnomalyChecks() {
       const file = dashboardCurrentFile();
       const sheet = dashboardCurrentSheet();
       if (!file || !sheet) return;
@@ -10884,11 +11337,12 @@
         const blankHeaders = [];
         for (let c = 0; c < maxCols; c += 1) if (!dashboardCellValue(header[c]).trim()) blankHeaders.push({ r: 0, c });
         dashboardAddFinding("missing", blankHeaders, `发现 ${blankHeaders.length} 个空白字段名`, { subtype: "blankHeader" });
-        const missing = [];
+        const missing = dashboardLocationCollector();
         for (let r = 1; r < sheet.rows.length; r += 1) {
-          for (let c = 0; c < maxCols; c += 1) if (String(dashboardCellRaw(sheet.rows[r]?.[c]) ?? "").trim() === "") missing.push({ r, c });
+          for (let c = 0; c < maxCols; c += 1) if (String(dashboardCellRaw(sheet.rows[r]?.[c]) ?? "").trim() === "") missing.add(r, c);
+          await dashboardYieldToUI(r);
         }
-        dashboardAddFinding("missing", missing, `发现 ${missing.length} 个缺失值`, { subtype: "missingValue" });
+        dashboardAddFinding("missing", missing.locations, `发现 ${missing.total} 个缺失值`, { subtype: "missingValue" }, missing.total);
       }
 
       if (selected.has("duplicateHeader")) {
@@ -10897,62 +11351,71 @@
         for (let c = 0; c < maxCols; c += 1) {
           const name = dashboardCellValue(header[c]).trim().toLowerCase();
           if (!name) continue;
-          if (map.has(name)) {
-            locations.push({ r: 0, c: map.get(name) }, { r: 0, c });
-          } else map.set(name, c);
+          if (map.has(name)) locations.push({ r: 0, c: map.get(name) }, { r: 0, c });
+          else map.set(name, c);
         }
         dashboardAddFinding("duplicateHeader", locations, `发现 ${new Set(locations.map((item) => item.c)).size} 个重复字段位置`);
       }
 
       if (selected.has("duplicateRow")) {
         const map = new Map();
-        const locations = [];
+        const locations = dashboardLocationCollector();
+        let duplicateRows = 0;
         for (let r = 1; r < sheet.rows.length; r += 1) {
           const signature = Array.from({ length: maxCols }, (_, c) => String(dashboardCellRaw(sheet.rows[r]?.[c]) ?? "").trim()).join("\u241f");
           if (map.has(signature)) {
-            for (let c = 0; c < maxCols; c += 1) locations.push({ r, c });
+            duplicateRows += 1;
+            for (let c = 0; c < maxCols; c += 1) locations.add(r, c);
           } else map.set(signature, r);
+          await dashboardYieldToUI(r);
         }
-        dashboardAddFinding("duplicateRow", locations, `发现 ${new Set(locations.map((item) => item.r)).size} 行重复数据`);
+        dashboardAddFinding("duplicateRow", locations.locations, `发现 ${duplicateRows} 行重复数据`, {}, locations.total);
       }
 
       if (selected.has("duplicateValue")) {
         const column = dashboardState.selectedCell?.c ?? Number(dashboardElements.calcField.value || 0);
         const map = new Map();
-        const locations = [];
+        const locations = dashboardLocationCollector();
         for (let r = 1; r < sheet.rows.length; r += 1) {
           const value = String(dashboardCellRaw(sheet.rows[r]?.[column]) ?? "").trim();
-          if (!value) continue;
-          if (map.has(value)) locations.push({ r: map.get(value), c: column }, { r, c: column });
-          else map.set(value, r);
+          if (value) {
+            if (map.has(value)) { locations.add(map.get(value), column); locations.add(r, column); }
+            else map.set(value, r);
+          }
+          await dashboardYieldToUI(r);
         }
-        dashboardAddFinding("duplicateValue", locations, `${dashboardHeaderLabel(sheet, column)}发现重复值`, { column });
+        dashboardAddFinding("duplicateValue", locations.locations, `${dashboardHeaderLabel(sheet, column)}发现重复值`, { column }, locations.total);
       }
 
       if (selected.has("sensitive")) {
         const pattern = /(姓名|身份证|证件|手机号|手机|电话|邮箱|邮件|地址|住址|银行卡|卡号|账号|密码|薪资|工资|name|id\s*card|phone|mobile|email|address|bank|account|password|salary)/i;
         const columns = [];
         for (let c = 0; c < maxCols; c += 1) if (pattern.test(dashboardCellValue(header[c]))) columns.push(c);
-        const locations = [];
-        columns.forEach((c) => {
-          locations.push({ r: 0, c });
-          for (let r = 1; r < sheet.rows.length; r += 1) if (String(dashboardCellRaw(sheet.rows[r]?.[c]) ?? "").trim()) locations.push({ r, c });
-        });
-        dashboardAddFinding("sensitive", locations, `识别到 ${columns.length} 个疑似敏感字段`, { columns });
+        const locations = dashboardLocationCollector();
+        for (const c of columns) {
+          locations.add(0, c);
+          for (let r = 1; r < sheet.rows.length; r += 1) {
+            if (String(dashboardCellRaw(sheet.rows[r]?.[c]) ?? "").trim()) locations.add(r, c);
+            await dashboardYieldToUI(r);
+          }
+        }
+        dashboardAddFinding("sensitive", locations.locations, `识别到 ${columns.length} 个疑似敏感字段`, { columns }, locations.total);
       }
 
       if (selected.has("mixedType")) {
         for (let c = 0; c < maxCols; c += 1) {
           const types = new Map();
-          const locations = [];
+          const locations = dashboardLocationCollector();
           for (let r = 1; r < sheet.rows.length; r += 1) {
             const value = dashboardCellRaw(sheet.rows[r]?.[c]);
             const type = dashboardValueType(value);
-            if (type === "empty") continue;
-            types.set(type, (types.get(type) || 0) + 1);
-            locations.push({ r, c });
+            if (type !== "empty") {
+              types.set(type, (types.get(type) || 0) + 1);
+              locations.add(r, c);
+            }
+            await dashboardYieldToUI(r);
           }
-          if (types.size > 1 && locations.length >= 3) dashboardAddFinding("mixedType", locations, `${dashboardHeaderLabel(sheet, c)}包含 ${Array.from(types.keys()).join("、")} 等类型`, { column: c });
+          if (types.size > 1 && locations.total >= 3) dashboardAddFinding("mixedType", locations.locations, `${dashboardHeaderLabel(sheet, c)}包含 ${Array.from(types.keys()).join("、")} 等类型`, { column: c }, locations.total);
         }
       }
 
@@ -10960,8 +11423,10 @@
         for (let c = 0; c < maxCols; c += 1) {
           const numeric = [];
           for (let r = 1; r < sheet.rows.length; r += 1) {
-            const value = Number(dashboardCellRaw(sheet.rows[r]?.[c]));
-            if (Number.isFinite(value) && String(dashboardCellRaw(sheet.rows[r]?.[c])).trim() !== "") numeric.push({ r, value });
+            const raw = dashboardCellRaw(sheet.rows[r]?.[c]);
+            const value = Number(raw);
+            if (Number.isFinite(value) && String(raw).trim() !== "") numeric.push({ r, value });
+            await dashboardYieldToUI(r);
           }
           if (numeric.length < 4) continue;
           const values = numeric.map((item) => item.value);
@@ -10970,43 +11435,47 @@
           const iqr = q3 - q1;
           const lower = q1 - 1.5 * iqr;
           const upper = q3 + 1.5 * iqr;
-          const locations = numeric.filter((item) => item.value < lower || item.value > upper).map((item) => ({ r: item.r, c }));
-          dashboardAddFinding("outlier", locations, `${dashboardHeaderLabel(sheet, c)}发现 ${locations.length} 个 IQR 异常值`, { column: c, lower, upper });
+          const locations = dashboardLocationCollector();
+          numeric.forEach((item) => { if (item.value < lower || item.value > upper) locations.add(item.r, c); });
+          dashboardAddFinding("outlier", locations.locations, `${dashboardHeaderLabel(sheet, c)}发现 ${locations.total} 个 IQR 异常值`, { column: c, lower, upper }, locations.total);
         }
       }
 
       if (selected.has("whitespace")) {
-        const locations = [];
+        const locations = dashboardLocationCollector();
         for (let r = 0; r < sheet.rows.length; r += 1) {
           for (let c = 0; c < maxCols; c += 1) {
             const value = dashboardCellRaw(sheet.rows[r]?.[c]);
-            if (typeof value === "string" && value !== value.trim()) locations.push({ r, c });
+            if (typeof value === "string" && value !== value.trim()) locations.add(r, c);
           }
+          await dashboardYieldToUI(r);
         }
-        dashboardAddFinding("whitespace", locations, `发现 ${locations.length} 个含首尾空格的单元格`);
+        dashboardAddFinding("whitespace", locations.locations, `发现 ${locations.total} 个含首尾空格的单元格`, {}, locations.total);
       }
 
       if (selected.has("formulaError")) {
-        const locations = [];
+        const locations = dashboardLocationCollector();
         for (let r = 0; r < sheet.rows.length; r += 1) {
           for (let c = 0; c < maxCols; c += 1) {
             const cell = sheet.rows[r]?.[c];
-            if (cell?.t === "e" || /^#(?:REF|VALUE|DIV\/0|N\/A|NAME|NUM|NULL)!?$/i.test(dashboardCellValue(cell))) locations.push({ r, c });
+            if (cell?.t === "e" || /^#(?:REF|VALUE|DIV\/0|N\/A|NAME|NUM|NULL)!?$/i.test(dashboardCellValue(cell))) locations.add(r, c);
           }
+          await dashboardYieldToUI(r);
         }
-        dashboardAddFinding("formulaError", locations, `发现 ${locations.length} 个公式或错误值`);
+        dashboardAddFinding("formulaError", locations.locations, `发现 ${locations.total} 个公式或错误值`, {}, locations.total);
       }
 
       if (selected.has("invalidDate")) {
         const dateHeaderPattern = /(日期|时间|年月|date|time)/i;
         for (let c = 0; c < maxCols; c += 1) {
           if (!dateHeaderPattern.test(dashboardCellValue(header[c]))) continue;
-          const locations = [];
+          const locations = dashboardLocationCollector();
           for (let r = 1; r < sheet.rows.length; r += 1) {
             const value = String(dashboardCellRaw(sheet.rows[r]?.[c]) ?? "").trim();
-            if (value && Number.isNaN(Date.parse(value))) locations.push({ r, c });
+            if (value && Number.isNaN(Date.parse(value))) locations.add(r, c);
+            await dashboardYieldToUI(r);
           }
-          dashboardAddFinding("invalidDate", locations, `${dashboardHeaderLabel(sheet, c)}发现 ${locations.length} 个疑似无效日期`, { column: c });
+          dashboardAddFinding("invalidDate", locations.locations, `${dashboardHeaderLabel(sheet, c)}发现 ${locations.total} 个疑似无效日期`, { column: c }, locations.total);
         }
       }
 
@@ -11022,11 +11491,12 @@
         dashboardElements.issueList.innerHTML = '<div class="dashboard-issue-empty">检查结果将说明文件、逻辑表及行列位置，并提供定位和处理入口。</div>';
         return;
       }
-      const total = dashboardState.findings.reduce((sum, item) => sum + item.locations.length, 0);
+      const total = dashboardState.findings.reduce((sum, item) => sum + (Number(item.totalCount) || item.locations.length), 0);
       dashboardElements.issueSummary.textContent = `${dashboardState.findings.length} 类问题，涉及 ${total} 个位置`;
       dashboardElements.issueList.innerHTML = dashboardState.findings.map((finding) => {
         const definition = dashboardIssueDefinitions[finding.type];
-        const location = `${file.name} / ${sheet.logicalName} / ${dashboardCompressLocations(finding.locations)}`;
+        const sampledNote = (Number(finding.totalCount) || 0) > finding.locations.length ? `（定位样本 ${finding.locations.length}/${finding.totalCount}）` : "";
+        const location = `${file.name} / ${sheet.logicalName} / ${dashboardCompressLocations(finding.locations)}${sampledNote}`;
         return `
           <article class="dashboard-issue-item">
             <span class="dashboard-issue-color ${definition.color}"></span>
@@ -11046,7 +11516,7 @@
       const location = finding?.locations?.[0];
       if (!location) return;
       dashboardState.selectedCell = { r: location.r, c: location.c };
-      dashboardRenderTable();
+      dashboardScrollToRow(location.r);
       setTimeout(() => {
         const cell = dashboardElements.body.querySelector(`[data-r="${location.r}"][data-c="${location.c}"]`);
         cell?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
@@ -11191,8 +11661,8 @@
         note = "当前条件下没有可用于数值计算的数据";
       } else if (operation === "sum") result = numericValues.reduce((sum, value) => sum + value, 0);
       else if (operation === "average") result = numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length;
-      else if (operation === "max") result = Math.max(...numericValues);
-      else if (operation === "min") result = Math.min(...numericValues);
+      else if (operation === "max") result = systemArrayMax(numericValues, 0);
+      else if (operation === "min") result = systemArrayMin(numericValues, 0);
       else if (operation === "std") {
         if (numericValues.length < 2) {
           result = 0;
@@ -11212,15 +11682,23 @@
 
     // 数据预处理 v0.9.0
     function dashboardPreprocessNormalizeMatrix(matrix) {
-      const source = Array.isArray(matrix) ? matrix : [];
-      const normalized = source.map((row) => Array.isArray(row)
-        ? row.map((cell) => cell === null || cell === undefined ? "" : String(cell))
-        : []);
+      const normalized = Array.isArray(matrix) ? matrix : [];
       if (!normalized.length) normalized.push(["", ""], ["", ""]);
       if (normalized.length === 1) normalized.push([]);
-      const maxCols = Math.max(2, ...normalized.map((row) => row.length));
-      normalized.forEach((row) => { while (row.length < maxCols) row.push(""); });
-      if (normalized.length * maxCols > 250000) throw new Error("预处理表规模超过浏览器上限");
+      let maxCols = 2;
+      for (let r = 0; r < normalized.length; r += 1) {
+        if (!Array.isArray(normalized[r])) normalized[r] = [];
+        const row = normalized[r];
+        for (let c = 0; c < row.length; c += 1) {
+          if (row[c] === null || row[c] === undefined) row[c] = "";
+          else if (typeof row[c] !== "string") row[c] = String(row[c]);
+        }
+        if (row.length > maxCols) maxCols = row.length;
+      }
+      const estimatedCells = normalized.length * maxCols;
+      if (estimatedCells > 10000000) throw new Error("预处理表超过1000万单元格的本地安全上限，请按业务主题拆分后处理");
+      if (estimatedCells <= 500000) normalized.forEach((row) => { while (row.length < maxCols) row.push(""); });
+      while (normalized[0].length < maxCols) normalized[0].push("");
       return normalized;
     }
 
@@ -11351,15 +11829,18 @@
 
     function dashboardPreprocessPushSnapshot(reason, table) {
       if (!table) return;
+      const cells = (table.matrix?.length || 0) * (table.matrix?.[0]?.length || 0);
       dashboardState.preprocessing.snapshots.push({
         id: dashboardId("preprocess-snapshot"),
         tableId: table.id,
         tableName: table.name,
         reason,
         matrix: dashboardClone(table.matrix),
-        at: new Date().toISOString()
+        at: new Date().toISOString(),
+        largeData: cells > 500000
       });
-      if (dashboardState.preprocessing.snapshots.length > 30) dashboardState.preprocessing.snapshots.splice(0, dashboardState.preprocessing.snapshots.length - 30);
+      const limit = cells > 500000 ? 2 : 30;
+      if (dashboardState.preprocessing.snapshots.length > limit) dashboardState.preprocessing.snapshots.splice(0, dashboardState.preprocessing.snapshots.length - limit);
     }
 
     function dashboardPreprocessCreateTable(matrix = [["", ""], ["", ""]], name = "") {
@@ -11463,9 +11944,15 @@
     }
 
     function dashboardPreprocessPushAction(label, table, before, after) {
-      if (!table || JSON.stringify(before) === JSON.stringify(after)) return;
+      if (!table || !before || !after) return;
+      const beforeRows = before.matrix?.length || 0, afterRows = after.matrix?.length || 0;
+      const beforeCols = before.matrix?.[0]?.length || 0, afterCols = after.matrix?.[0]?.length || 0;
+      const changed = before.name !== after.name || beforeRows !== afterRows || beforeCols !== afterCols || before.updatedAt !== after.updatedAt || before.matrix !== after.matrix;
+      if (!changed) return;
       dashboardState.preprocessUndoStack.push({ label, tableId: table.id, before, after });
-      if (dashboardState.preprocessUndoStack.length > 40) dashboardState.preprocessUndoStack.shift();
+      const cells = Math.max(beforeRows * beforeCols, afterRows * afterCols);
+      const limit = cells > 500000 ? 3 : 40;
+      if (dashboardState.preprocessUndoStack.length > limit) dashboardState.preprocessUndoStack.splice(0, dashboardState.preprocessUndoStack.length - limit);
       dashboardState.preprocessRedoStack = [];
       dashboardPreprocessUpdateGate();
     }
@@ -11537,7 +12024,7 @@
 
 
     function dashboardPreprocessResolvedHeaders(matrix) {
-      const source = dashboardPreprocessNormalizeMatrix(matrix)[0] || [];
+      const source = Array.isArray(matrix?.[0]) ? matrix[0] : [];
       const used = new Map();
       return source.map((value, index) => {
         const base = String(value ?? "").trim() || (index === 0 ? "行索引" : `字段_${index}`);
@@ -11554,10 +12041,10 @@
     }
 
     function dashboardPreprocessUsedRange(matrix) {
-      const normalized = dashboardPreprocessNormalizeMatrix(matrix);
+      const normalized = Array.isArray(matrix) ? matrix : [];
       let lastRow = -1;
       let lastCol = -1;
-      normalized.forEach((row, r) => row.forEach((value, c) => {
+      normalized.forEach((row, r) => (Array.isArray(row) ? row : []).forEach((value, c) => {
         if (String(value ?? "").trim() !== "") {
           lastRow = Math.max(lastRow, r);
           lastCol = Math.max(lastCol, c);
@@ -11632,20 +12119,382 @@
       return dashboardState.files.map((file) => ({
         fileId: file.id,
         fileName: file.name,
-        sheets: (file.sheets || []).map((sheet) => ({
-          sheetId: sheet.id,
-          sheetName: sheet.logicalName || sheet.name,
-          headers: (sheet.rows?.[0] || []).map((cell) => dashboardCellValue(cell)),
-          rows: dashboardPreprocessPrimitiveRows(sheet).slice(1)
-        }))
+        sheets: (file.sheets || []).map((sheet) => {
+          const primitive = dashboardPreprocessPrimitiveRows(sheet);
+          const headers = (primitive[0] || []).map((value, index) => String(value || `字段_${index + 1}`));
+          const profile = systemProfileRows(headers, primitive.slice(1), {
+            profileLimit: SYSTEM_LARGE_DATA_CONFIG.profileSampleRows,
+            sampleLimit: SYSTEM_LARGE_DATA_CONFIG.aiSampleRows
+          });
+          return {
+            sheetId: sheet.id,
+            sheetName: sheet.logicalName || sheet.name,
+            headers,
+            rowCount: profile.row_count,
+            columnCount: profile.column_count,
+            profile
+          };
+        })
       }));
     }
 
     function preprocessingSkillPrompt() {
-      return `# 数据预处理 AI Skill v0.9.0\n\n你负责把自然语言预处理需求转换为精确的表格结果。输入包含当前项目编号、当前预处理表和项目数据底表。\n\n## 工作目标\n1. 识别用户要求中的字段匹配、VLOOKUP、Merge、清洗、空值处理、异常值处理、四则运算、分组聚合、排序和更新逻辑。\n2. 只使用source_catalogue中真实存在的fileId、sheetId、字段名和数据。字段匹配优先使用完全一致名称；需要近似匹配时必须在message中说明。\n3. 允许读取项目数据底表，但只允许写入target_table。不得修改、删除或伪造原始底表。\n4. 当前预处理表的显示字段或首列内容可能为空、重复或尚未填写。优先使用resolved_headers作为内部字段标识，并结合列位置、已有值、用户指令和底表字段自动识别对应关系。无法唯一判断时返回error。\n5. 输出必须包含处理后的完整目标表。可以新增列、更新列、删除用户明确要求删除的行或列。未被用户要求修改的内容保持原值。target_table.name默认沿用输入名称；只有用户明确提出重命名、改名或“命名为”时才允许修改。\n6. 关联计算必须明确关联键。出现一对多匹配时，根据用户要求选择最新记录、首条记录或聚合；用户未说明且无法唯一判断时返回error。\n7. 数值计算不得凭空补值。无法找到字段、关联键、匹配记录或计算口径时返回error，并列出missing_fields或ambiguities。\n\n## 输出协议\n只输出严格JSON，不使用Markdown。\n成功：\n{\n  "status":"ok",\n  "message":"处理说明",\n  "target_table":{\n    "id":"沿用输入tableId",\n    "name":"目标表名称",\n    "headers":["行索引","字段A","新增字段"],\n    "rows":[["行1","值","计算结果"]]\n  },\n  "operations":["字段匹配说明","计算说明"],\n  "source_usage":[{"fileId":"真实文件ID","sheetId":"真实表ID","fields":["真实字段名"]}]\n}\n失败：\n{\n  "status":"error",\n  "error":"明确错误原因",\n  "missing_fields":["缺失字段"],\n  "ambiguities":["无法确定的口径"]\n}\n\n## 完整性约束\n- headers与每一行rows列数完全一致。\n- 输出字段名应可识别；输入空字段由你依据resolved_headers和语义补全。\n- source_usage中的文件、工作表和字段必须来自source_catalogue。\n- 不返回公式说明表、示例表或截断数据。`;
+      return `# 数据预处理 AI Skill v0.9.1\n\n你负责把自然语言预处理需求转换为可由浏览器本地执行的结构化操作计划。输入仅包含字段目录、统计画像和代表性样本，不包含上万或十万行全量底表。全量数据由系统在本地执行，不得要求用户缩减数据。\n\n## 工作目标\n1. 识别字段匹配、VLOOKUP、Merge、清洗、空值处理、异常值处理、四则运算、分组聚合、筛选、去重、排序和更新逻辑。\n2. 只使用source_catalogue中真实存在的fileId、sheetId、字段名。字段匹配优先完全一致；近似匹配必须在message和ambiguities中说明。\n3. 只返回执行计划，不返回全量数据，不复制sample_rows，不输出代码。\n4. 当前预处理表字段可能为空或重复。优先使用resolved_headers；无法唯一判断时返回error。\n5. 关联计算必须明确目标键、来源键和来源值。出现一对多时使用first、last、latest、sum、mean、min、max、count或concat之一；用户未说明且无法判断时返回error。\n6. 操作按operations顺序执行。未被用户要求修改的字段和记录保持原值。\n\n## 支持的操作\n- rename_columns: {"type":"rename_columns","mapping":{"旧字段":"新字段"}}\n- trim: {"type":"trim","fields":["字段A"]}，fields为空表示全部字段\n- normalize_whitespace: {"type":"normalize_whitespace","fields":["字段A"]}\n- replace: {"type":"replace","field":"字段A","find":"旧值","replacement":"新值","exact":true}\n- fill_missing: {"type":"fill_missing","field":"字段A","strategy":"value|mean|median|mode|forward|backward","value":"可选"}\n- copy_column: {"type":"copy_column","source":"字段A","target":"字段B"}\n- calculate: {"type":"calculate","target":"新字段","expression":表达式}\n- lookup: {"type":"lookup","target":"结果字段","target_key":"目标键","source_file_id":"文件ID","source_sheet_id":"表ID","source_key":"来源键","source_value":"来源值","multiple":"first|last|latest|sum|mean|min|max|count|concat","order_by":"latest时可选字段","separator":"concat时可选"}\n- filter_rows: {"type":"filter_rows","logic":"AND|OR","conditions":[条件]}\n- remove_duplicates: {"type":"remove_duplicates","fields":["字段A"],"keep":"first|last"}\n- sort: {"type":"sort","fields":["字段A"],"directions":["asc|desc"]}\n- delete_columns: {"type":"delete_columns","fields":["字段A"]}\n- select_columns: {"type":"select_columns","fields":["字段A","字段B"]}\n- aggregate: {"type":"aggregate","group_by":["字段A"],"metrics":[{"field":"字段B","op":"count|sum|mean|min|max|median|unique_count|first|last|concat","as":"结果字段"}]}\n\n表达式格式：\n- 字段：{"field":"字段A"}\n- 常量：{"value":10}\n- 运算：{"op":"add|subtract|multiply|divide|mod|power|concat|coalesce|round|abs|lower|upper|trim|length|percentage|if","args":[...] }\n- if表达式：{"op":"if","condition":条件,"then":表达式,"else":表达式}\n条件格式：{"field":"字段A","operator":"eq|neq|gt|gte|lt|lte|contains|starts_with|ends_with|empty|not_empty|in","value":"值或数组"}\n\n## 输出协议\n只输出严格JSON。\n成功：\n{"status":"ok","message":"处理说明","target_table_name":"沿用原名或用户明确要求的新名称","execution_plan":{"version":"1.0","operations":[]},"source_usage":[{"fileId":"真实文件ID","sheetId":"真实表ID","fields":["真实字段名"]}],"warnings":[]}\n失败：\n{"status":"error","error":"明确错误原因","missing_fields":[],"ambiguities":[]}\n\n## 完整性约束\n- operations必须可由上述操作表示；无法表示时返回error。\n- 不返回target_table.rows或任何全量记录。\n- 不使用eval、JavaScript、Python、SQL或公式字符串。`;
     }
     window.preprocessingSkillPrompt = preprocessingSkillPrompt;
 
+    function dashboardPreprocessFieldIndex(headers, field, allowMissing = false) {
+      if (Number.isInteger(field)) return field >= 0 && field < headers.length ? field : -1;
+      const text = String(field ?? "").trim();
+      if (!text) return -1;
+      let index = headers.findIndex((name) => String(name) === text);
+      if (index < 0) index = headers.findIndex((name) => String(name).trim().toLowerCase() === text.toLowerCase());
+      if (index < 0 && !allowMissing) throw new Error(`未找到字段：${text}`);
+      return index;
+    }
+
+    function dashboardPreprocessEnsureColumn(matrix, headers, name) {
+      const target = String(name || "").trim();
+      if (!target) throw new Error("目标字段名不能为空");
+      let index = dashboardPreprocessFieldIndex(headers, target, true);
+      if (index >= 0) return index;
+      index = headers.length;
+      headers.push(target);
+      matrix[0] = headers.slice();
+      for (let r = 1; r < matrix.length; r += 1) matrix[r][index] = matrix[r][index] ?? "";
+      return index;
+    }
+
+    function dashboardPreprocessNumber(value) {
+      if (typeof value === "number") return Number.isFinite(value) ? value : NaN;
+      const text = String(value ?? "").trim().replace(/,/g, "");
+      if (!text) return NaN;
+      const number = Number(text);
+      return Number.isFinite(number) ? number : NaN;
+    }
+
+    function dashboardPreprocessCondition(row, headers, condition) {
+      const item = condition && typeof condition === "object" ? condition : {};
+      const index = dashboardPreprocessFieldIndex(headers, item.field);
+      const raw = row?.[index] ?? "";
+      const leftText = String(raw ?? "").trim();
+      const operator = String(item.operator || "eq");
+      const target = item.value;
+      if (operator === "empty") return leftText === "";
+      if (operator === "not_empty") return leftText !== "";
+      if (operator === "contains") return leftText.toLowerCase().includes(String(target ?? "").toLowerCase());
+      if (operator === "starts_with") return leftText.toLowerCase().startsWith(String(target ?? "").toLowerCase());
+      if (operator === "ends_with") return leftText.toLowerCase().endsWith(String(target ?? "").toLowerCase());
+      if (operator === "in") return (Array.isArray(target) ? target : [target]).map((value) => String(value)).includes(leftText);
+      const leftNumber = dashboardPreprocessNumber(raw), rightNumber = dashboardPreprocessNumber(target);
+      const numeric = Number.isFinite(leftNumber) && Number.isFinite(rightNumber);
+      const left = numeric ? leftNumber : leftText.toLowerCase();
+      const right = numeric ? rightNumber : String(target ?? "").trim().toLowerCase();
+      if (operator === "eq") return left === right;
+      if (operator === "neq") return left !== right;
+      if (operator === "gt") return left > right;
+      if (operator === "gte") return left >= right;
+      if (operator === "lt") return left < right;
+      if (operator === "lte") return left <= right;
+      throw new Error(`不支持的条件运算符：${operator}`);
+    }
+
+    function dashboardPreprocessExpression(expression, row, headers) {
+      if (expression === null || expression === undefined) return "";
+      if (typeof expression !== "object" || Array.isArray(expression)) return expression;
+      if (Object.prototype.hasOwnProperty.call(expression, "field")) {
+        const index = dashboardPreprocessFieldIndex(headers, expression.field);
+        return row?.[index] ?? "";
+      }
+      if (Object.prototype.hasOwnProperty.call(expression, "value")) return expression.value;
+      const op = String(expression.op || "").toLowerCase();
+      const args = Array.isArray(expression.args) ? expression.args.map((item) => dashboardPreprocessExpression(item, row, headers)) : [];
+      const nums = args.map(dashboardPreprocessNumber);
+      if (op === "add") return nums.reduce((sum, value) => Number.isFinite(value) ? sum + value : sum, 0);
+      if (op === "subtract") return Number.isFinite(nums[0]) ? nums.slice(1).reduce((value, item) => Number.isFinite(item) ? value - item : value, nums[0]) : "";
+      if (op === "multiply") return nums.every(Number.isFinite) ? nums.reduce((value, item) => value * item, 1) : "";
+      if (op === "divide") return Number.isFinite(nums[0]) && Number.isFinite(nums[1]) && nums[1] !== 0 ? nums[0] / nums[1] : "";
+      if (op === "mod") return Number.isFinite(nums[0]) && Number.isFinite(nums[1]) && nums[1] !== 0 ? nums[0] % nums[1] : "";
+      if (op === "power") return Number.isFinite(nums[0]) && Number.isFinite(nums[1]) ? nums[0] ** nums[1] : "";
+      if (op === "percentage") return Number.isFinite(nums[0]) && Number.isFinite(nums[1]) && nums[1] !== 0 ? nums[0] / nums[1] * 100 : "";
+      if (op === "concat") return args.map((value) => String(value ?? "")).join(String(expression.separator ?? ""));
+      if (op === "coalesce") return args.find((value) => String(value ?? "").trim() !== "") ?? "";
+      if (op === "round") return Number.isFinite(nums[0]) ? Number(nums[0].toFixed(Math.max(0, Math.min(12, Number(expression.digits ?? args[1] ?? 0) || 0)))) : "";
+      if (op === "abs") return Number.isFinite(nums[0]) ? Math.abs(nums[0]) : "";
+      if (op === "lower") return String(args[0] ?? "").toLowerCase();
+      if (op === "upper") return String(args[0] ?? "").toUpperCase();
+      if (op === "trim") return String(args[0] ?? "").trim();
+      if (op === "length") return String(args[0] ?? "").length;
+      if (op === "if") return dashboardPreprocessCondition(row, headers, expression.condition)
+        ? dashboardPreprocessExpression(expression.then, row, headers)
+        : dashboardPreprocessExpression(expression.else, row, headers);
+      throw new Error(`不支持的表达式运算：${op || "空"}`);
+    }
+
+    function dashboardPreprocessSourceSheet(fileId, sheetId) {
+      const file = dashboardState.files.find((item) => String(item.id) === String(fileId));
+      const sheet = file?.sheets?.find((item) => String(item.id) === String(sheetId));
+      if (!file) throw new Error(`来源文件不存在：${fileId}`);
+      if (!sheet) throw new Error(`来源工作表不存在：${sheetId}`);
+      const rows = dashboardPreprocessPrimitiveRows(sheet);
+      const headers = dashboardPreprocessResolvedHeaders(rows);
+      return { file, sheet, headers, rows: rows.slice(1) };
+    }
+
+    async function dashboardPreprocessYield(index, every = 5000) {
+      if (index > 0 && index % every === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    function dashboardPreprocessAggregateValue(values, op, separator = "、") {
+      const nonEmpty = values.filter((value) => String(value ?? "").trim() !== "");
+      const numbers = nonEmpty.map(dashboardPreprocessNumber).filter(Number.isFinite);
+      if (op === "count") return nonEmpty.length;
+      if (op === "unique_count") return new Set(nonEmpty.map(String)).size;
+      if (op === "sum") return numbers.reduce((sum, value) => sum + value, 0);
+      if (op === "mean") return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : "";
+      if (op === "min") return numbers.length ? numbers.reduce((value, item) => Math.min(value, item), Infinity) : "";
+      if (op === "max") return numbers.length ? numbers.reduce((value, item) => Math.max(value, item), -Infinity) : "";
+      if (op === "median") {
+        if (!numbers.length) return "";
+        numbers.sort((a, b) => a - b);
+        const middle = Math.floor(numbers.length / 2);
+        return numbers.length % 2 ? numbers[middle] : (numbers[middle - 1] + numbers[middle]) / 2;
+      }
+      if (op === "first") return nonEmpty[0] ?? "";
+      if (op === "last") return nonEmpty[nonEmpty.length - 1] ?? "";
+      if (op === "concat") return [...new Set(nonEmpty.map(String))].join(separator);
+      throw new Error(`不支持的聚合方式：${op}`);
+    }
+
+    async function dashboardPreprocessExecutePlan(table, plan, progress) {
+      const operations = Array.isArray(plan?.operations) ? plan.operations : [];
+      if (!operations.length) throw new Error("AI执行计划没有operations");
+      let matrix = table.matrix.map((row) => Array.isArray(row) ? row.slice() : []);
+      let headers = dashboardPreprocessResolvedHeaders(matrix);
+      matrix[0] = headers.slice();
+      const reportProgress = typeof progress === "function" ? progress : () => {};
+      for (let operationIndex = 0; operationIndex < operations.length; operationIndex += 1) {
+        const operation = operations[operationIndex] || {};
+        const type = String(operation.type || "").toLowerCase();
+        reportProgress(operationIndex + 1, operations.length, type);
+        if (type === "rename_columns") {
+          const mapping = operation.mapping && typeof operation.mapping === "object" ? operation.mapping : {};
+          Object.entries(mapping).forEach(([from, to]) => {
+            const index = dashboardPreprocessFieldIndex(headers, from);
+            const next = String(to || "").trim();
+            if (!next) throw new Error(`字段“${from}”的新名称为空`);
+            headers[index] = next;
+          });
+          matrix[0] = headers.slice();
+        } else if (["trim", "normalize_whitespace"].includes(type)) {
+          const fields = Array.isArray(operation.fields) && operation.fields.length ? operation.fields : headers;
+          const indexes = fields.map((field) => dashboardPreprocessFieldIndex(headers, field));
+          for (let r = 1; r < matrix.length; r += 1) {
+            indexes.forEach((index) => {
+              const value = String(matrix[r]?.[index] ?? "");
+              matrix[r][index] = type === "trim" ? value.trim() : value.replace(/\s+/g, " ").trim();
+            });
+            await dashboardPreprocessYield(r);
+          }
+        } else if (type === "replace") {
+          const index = dashboardPreprocessFieldIndex(headers, operation.field);
+          const find = String(operation.find ?? ""), replacement = String(operation.replacement ?? "");
+          for (let r = 1; r < matrix.length; r += 1) {
+            const value = String(matrix[r]?.[index] ?? "");
+            matrix[r][index] = operation.exact === false ? value.split(find).join(replacement) : (value === find ? replacement : value);
+            await dashboardPreprocessYield(r);
+          }
+        } else if (type === "fill_missing") {
+          const index = dashboardPreprocessFieldIndex(headers, operation.field);
+          const strategy = String(operation.strategy || "value");
+          const existing = matrix.slice(1).map((row) => row?.[index]).filter((value) => String(value ?? "").trim() !== "");
+          let fill = operation.value ?? "";
+          if (["mean", "median", "mode"].includes(strategy)) {
+            if (strategy === "mode") {
+              const counts = new Map();
+              existing.forEach((value) => counts.set(String(value), (counts.get(String(value)) || 0) + 1));
+              fill = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+            } else fill = dashboardPreprocessAggregateValue(existing, strategy);
+          }
+          if (strategy === "backward") {
+            let next = "";
+            for (let r = matrix.length - 1; r >= 1; r -= 1) {
+              if (String(matrix[r]?.[index] ?? "").trim() === "") matrix[r][index] = next;
+              else next = matrix[r][index];
+              await dashboardPreprocessYield(matrix.length - r);
+            }
+          } else {
+            let previous = "";
+            for (let r = 1; r < matrix.length; r += 1) {
+              if (String(matrix[r]?.[index] ?? "").trim() === "") matrix[r][index] = strategy === "forward" ? previous : fill;
+              else previous = matrix[r][index];
+              await dashboardPreprocessYield(r);
+            }
+          }
+        } else if (type === "copy_column") {
+          const source = dashboardPreprocessFieldIndex(headers, operation.source);
+          const target = dashboardPreprocessEnsureColumn(matrix, headers, operation.target);
+          for (let r = 1; r < matrix.length; r += 1) { matrix[r][target] = matrix[r]?.[source] ?? ""; await dashboardPreprocessYield(r); }
+        } else if (type === "calculate") {
+          const target = dashboardPreprocessEnsureColumn(matrix, headers, operation.target);
+          for (let r = 1; r < matrix.length; r += 1) {
+            matrix[r][target] = dashboardPreprocessExpression(operation.expression, matrix[r], headers);
+            await dashboardPreprocessYield(r);
+          }
+        } else if (type === "lookup") {
+          const targetKey = dashboardPreprocessFieldIndex(headers, operation.target_key);
+          const target = dashboardPreprocessEnsureColumn(matrix, headers, operation.target);
+          const source = dashboardPreprocessSourceSheet(operation.source_file_id, operation.source_sheet_id);
+          const sourceKey = dashboardPreprocessFieldIndex(source.headers, operation.source_key);
+          const sourceValue = dashboardPreprocessFieldIndex(source.headers, operation.source_value);
+          const orderBy = operation.order_by ? dashboardPreprocessFieldIndex(source.headers, operation.order_by) : -1;
+          const lookup = new Map();
+          for (let r = 0; r < source.rows.length; r += 1) {
+            const key = String(source.rows[r]?.[sourceKey] ?? "").trim();
+            if (!key) continue;
+            if (!lookup.has(key)) lookup.set(key, []);
+            lookup.get(key).push(source.rows[r]);
+            await dashboardPreprocessYield(r);
+          }
+          const multiple = String(operation.multiple || "first");
+          for (let r = 1; r < matrix.length; r += 1) {
+            const key = String(matrix[r]?.[targetKey] ?? "").trim();
+            const matches = lookup.get(key) || [];
+            let value = "";
+            if (matches.length) {
+              if (multiple === "first") value = matches[0]?.[sourceValue] ?? "";
+              else if (multiple === "last") value = matches[matches.length - 1]?.[sourceValue] ?? "";
+              else if (multiple === "latest") {
+                const sorted = matches.slice().sort((a, b) => {
+                  const av = orderBy >= 0 ? Date.parse(a?.[orderBy]) || dashboardPreprocessNumber(a?.[orderBy]) || 0 : 0;
+                  const bv = orderBy >= 0 ? Date.parse(b?.[orderBy]) || dashboardPreprocessNumber(b?.[orderBy]) || 0 : 0;
+                  return bv - av;
+                });
+                value = sorted[0]?.[sourceValue] ?? "";
+              } else value = dashboardPreprocessAggregateValue(matches.map((item) => item?.[sourceValue]), multiple, operation.separator || "、");
+            }
+            matrix[r][target] = value;
+            await dashboardPreprocessYield(r);
+          }
+        } else if (type === "filter_rows") {
+          const conditions = Array.isArray(operation.conditions) ? operation.conditions : [];
+          const logic = String(operation.logic || "AND").toUpperCase();
+          const kept = [headers.slice()];
+          for (let r = 1; r < matrix.length; r += 1) {
+            const checks = conditions.map((condition) => dashboardPreprocessCondition(matrix[r], headers, condition));
+            const pass = logic === "OR" ? checks.some(Boolean) : checks.every(Boolean);
+            if (pass) kept.push(matrix[r]);
+            await dashboardPreprocessYield(r);
+          }
+          matrix = kept;
+        } else if (type === "remove_duplicates") {
+          const indexes = (operation.fields || []).map((field) => dashboardPreprocessFieldIndex(headers, field));
+          if (!indexes.length) throw new Error("去重操作必须指定fields");
+          const keepLast = String(operation.keep || "first") === "last";
+          const seen = new Set(), kept = [headers.slice()];
+          const order = keepLast ? Array.from({ length: matrix.length - 1 }, (_, index) => matrix.length - 1 - index) : Array.from({ length: matrix.length - 1 }, (_, index) => index + 1);
+          for (let i = 0; i < order.length; i += 1) {
+            const r = order[i], key = JSON.stringify(indexes.map((index) => matrix[r]?.[index] ?? ""));
+            if (!seen.has(key)) { seen.add(key); kept.push(matrix[r]); }
+            await dashboardPreprocessYield(i);
+          }
+          if (keepLast) kept.splice(1, kept.length - 1, ...kept.slice(1).reverse());
+          matrix = kept;
+        } else if (type === "sort") {
+          const indexes = (operation.fields || []).map((field) => dashboardPreprocessFieldIndex(headers, field));
+          const directions = Array.isArray(operation.directions) ? operation.directions : [];
+          matrix = [headers.slice(), ...matrix.slice(1).map((row, index) => ({ row, index })).sort((left, right) => {
+            for (let i = 0; i < indexes.length; i += 1) {
+              const aRaw = left.row?.[indexes[i]] ?? "", bRaw = right.row?.[indexes[i]] ?? "";
+              const an = dashboardPreprocessNumber(aRaw), bn = dashboardPreprocessNumber(bRaw);
+              const comparison = Number.isFinite(an) && Number.isFinite(bn) ? an - bn : String(aRaw).localeCompare(String(bRaw), "zh-CN", { numeric: true });
+              if (comparison) return String(directions[i] || "asc") === "desc" ? -comparison : comparison;
+            }
+            return left.index - right.index;
+          }).map((item) => item.row)];
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        } else if (["delete_columns", "select_columns"].includes(type)) {
+          const requested = (operation.fields || []).map((field) => dashboardPreprocessFieldIndex(headers, field));
+          const selected = type === "delete_columns"
+            ? headers.map((_, index) => index).filter((index) => !requested.includes(index))
+            : requested;
+          if (!selected.length) throw new Error(`${type}执行后没有保留字段`);
+          matrix = matrix.map((row) => selected.map((index) => row?.[index] ?? ""));
+          headers = selected.map((index) => headers[index]);
+          matrix[0] = headers.slice();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        } else if (type === "aggregate") {
+          const groupFields = Array.isArray(operation.group_by) ? operation.group_by : [];
+          const groupIndexes = groupFields.map((field) => dashboardPreprocessFieldIndex(headers, field));
+          const metrics = Array.isArray(operation.metrics) ? operation.metrics : [];
+          if (!metrics.length) throw new Error("聚合操作必须包含metrics");
+          const metricIndexes = metrics.map((metric) => metric.op === "count" && !metric.field ? -1 : dashboardPreprocessFieldIndex(headers, metric.field));
+          const createAccumulator = (metric) => ({
+            op: String(metric.op || "count"), count: 0, sum: 0, min: Infinity, max: -Infinity,
+            first: "", last: "", values: [], unique: new Set()
+          });
+          const addAccumulator = (accumulator, raw) => {
+            const text = String(raw ?? "").trim();
+            if (!text) return;
+            accumulator.count += 1;
+            if (accumulator.first === "") accumulator.first = raw;
+            accumulator.last = raw;
+            const number = dashboardPreprocessNumber(raw);
+            if (Number.isFinite(number)) {
+              accumulator.sum += number;
+              accumulator.min = Math.min(accumulator.min, number);
+              accumulator.max = Math.max(accumulator.max, number);
+              if (accumulator.op === "median") accumulator.values.push(number);
+            }
+            if (["unique_count", "concat"].includes(accumulator.op)) accumulator.unique.add(String(raw));
+          };
+          const finishAccumulator = (accumulator, metric) => {
+            if (accumulator.op === "count") return accumulator.count;
+            if (accumulator.op === "unique_count") return accumulator.unique.size;
+            if (accumulator.op === "sum") return accumulator.sum;
+            if (accumulator.op === "mean") return accumulator.count ? accumulator.sum / accumulator.count : "";
+            if (accumulator.op === "min") return accumulator.min === Infinity ? "" : accumulator.min;
+            if (accumulator.op === "max") return accumulator.max === -Infinity ? "" : accumulator.max;
+            if (accumulator.op === "first") return accumulator.first;
+            if (accumulator.op === "last") return accumulator.last;
+            if (accumulator.op === "concat") return [...accumulator.unique].join(metric.separator || "、");
+            if (accumulator.op === "median") {
+              accumulator.values.sort((a, b) => a - b);
+              const middle = Math.floor(accumulator.values.length / 2);
+              return accumulator.values.length ? (accumulator.values.length % 2 ? accumulator.values[middle] : (accumulator.values[middle - 1] + accumulator.values[middle]) / 2) : "";
+            }
+            throw new Error(`不支持的聚合方式：${accumulator.op}`);
+          };
+          const groups = new Map();
+          for (let r = 1; r < matrix.length; r += 1) {
+            const keyValues = groupIndexes.map((index) => matrix[r]?.[index] ?? "");
+            const key = JSON.stringify(keyValues);
+            if (!groups.has(key)) groups.set(key, { keyValues, accumulators: metrics.map(createAccumulator) });
+            const group = groups.get(key);
+            metrics.forEach((metric, metricIndex) => {
+              const raw = metricIndexes[metricIndex] < 0 ? 1 : matrix[r]?.[metricIndexes[metricIndex]];
+              addAccumulator(group.accumulators[metricIndex], raw);
+            });
+            await dashboardPreprocessYield(r);
+          }
+          const outputHeaders = [...groupFields, ...metrics.map((metric, index) => String(metric.as || `${metric.op}_${metric.field || index + 1}`))];
+          const output = [outputHeaders];
+          let groupCounter = 0;
+          for (const group of groups.values()) {
+            output.push([...group.keyValues, ...group.accumulators.map((accumulator, index) => finishAccumulator(accumulator, metrics[index]))]);
+            groupCounter += 1;
+            await dashboardPreprocessYield(groupCounter);
+          }
+          matrix = output;
+          headers = outputHeaders;
+        } else {
+          throw new Error(`AI返回了系统未支持的预处理操作：${type || "空"}`);
+        }
+      }
+      matrix = dashboardPreprocessNormalizeMatrix(matrix);
+      matrix[0] = dashboardPreprocessResolvedHeaders(matrix);
+      return matrix;
+    }
     function dashboardPreprocessExtractJson(content) {
       const source = String(content || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
       try { return JSON.parse(source); } catch (error) {
@@ -11670,37 +12519,118 @@
       return issues;
     }
 
+    function dashboardPreprocessSlimProfile(profile, instruction, detailLimit = 180) {
+      const source = profile && typeof profile === "object" ? profile : {};
+      const fields = Array.isArray(source.fields) ? source.fields : [];
+      const requirement = String(instruction || "").toLowerCase();
+      const ranked = fields.map((field, index) => {
+        const name = String(field.name || "");
+        let score = requirement.includes(name.toLowerCase()) ? 1000 : 0;
+        for (const token of requirement.split(/[\s,，。；;、：:()（）]+/).filter((item) => item.length >= 2)) {
+          if (name.toLowerCase().includes(token)) score += token.length * 5;
+        }
+        return { field, index, score };
+      }).sort((a, b) => b.score - a.score || a.index - b.index);
+      const detailedIndexes = new Set(ranked.slice(0, Math.min(detailLimit, ranked.length)).map((item) => item.index));
+      return {
+        row_count: source.row_count || 0,
+        column_count: source.column_count || 0,
+        headers: Array.isArray(source.headers) ? source.headers : [],
+        profile_basis: source.profile_basis || 0,
+        all_fields: fields.map((field) => ({ index: field.index, name: field.name })),
+        fields: fields.filter((_, index) => detailedIndexes.has(index)).map((field) => ({
+          index: field.index,
+          name: field.name,
+          missing_ratio_approx: field.missing_ratio_approx,
+          unique_count_approx: field.unique_count_approx,
+          sample_values: (field.sample_values || []).slice(0, 6),
+          numeric_summary: field.numeric_summary
+        })),
+        sample_rows: (source.sample_rows || []).slice(0, 16)
+      };
+    }
+
+    function dashboardPreprocessBuildAIPayload(table, instruction) {
+      const resolvedHeaders = dashboardPreprocessResolvedHeaders(table.matrix);
+      const targetRows = table.matrix.slice(1);
+      const targetProfile = systemProfileRows(resolvedHeaders, targetRows, {
+        profileLimit: SYSTEM_LARGE_DATA_CONFIG.profileSampleRows,
+        sampleLimit: SYSTEM_LARGE_DATA_CONFIG.aiSampleRows
+      });
+      const sourceCatalogue = dashboardPreprocessSourceCatalogue().map((file) => ({
+        fileId: file.fileId,
+        fileName: file.fileName,
+        sheets: file.sheets.map((sheet) => ({
+          sheetId: sheet.sheetId,
+          sheetName: sheet.sheetName,
+          headers: sheet.headers,
+          rowCount: sheet.rowCount,
+          columnCount: sheet.columnCount,
+          profile: dashboardPreprocessSlimProfile(sheet.profile, instruction)
+        }))
+      }));
+      const payload = {
+        project_id: dashboardState.projectId,
+        instruction,
+        context_mode: "schema_profile_representative_samples",
+        full_data_execution: "browser_local",
+        target_table: {
+          tableId: table.id,
+          name: table.name,
+          headers: table.matrix[0],
+          resolved_headers: resolvedHeaders,
+          profile: dashboardPreprocessSlimProfile(targetProfile, instruction)
+        },
+        source_catalogue: sourceCatalogue,
+        execution_contract: {
+          plan_only: true,
+          no_full_rows_in_response: true,
+          local_full_row_execution: true,
+          preserve_unmentioned_data: true
+        }
+      };
+      let size = systemJsonSize(payload);
+      if (size > SYSTEM_LARGE_DATA_CONFIG.aiSoftChars) {
+        payload.target_table.profile.sample_rows = payload.target_table.profile.sample_rows.slice(0, 8);
+        payload.target_table.profile.fields.forEach((field) => { field.sample_values = (field.sample_values || []).slice(0, 3); });
+        payload.source_catalogue.forEach((file) => file.sheets.forEach((sheet) => {
+          sheet.profile.sample_rows = [];
+          sheet.profile.fields = sheet.profile.fields.slice(0, 100).map((field) => ({ ...field, sample_values: (field.sample_values || []).slice(0, 3) }));
+        }));
+        size = systemJsonSize(payload);
+      }
+      if (size > SYSTEM_LARGE_DATA_CONFIG.aiHardChars) {
+        payload.source_catalogue.forEach((file) => file.sheets.forEach((sheet) => {
+          sheet.profile.fields = sheet.profile.fields.slice(0, 40).map((field) => ({ index: field.index, name: field.name, numeric_summary: field.numeric_summary }));
+        }));
+        payload.target_table.profile.fields = payload.target_table.profile.fields.slice(0, 80);
+        payload.context_notice = "字段极多，详细画像按需求相关度截取；all_fields仍保留全部字段名称与位置。";
+        size = systemJsonSize(payload);
+      }
+      return { payload, size, rowCount: targetRows.length };
+    }
+
     function dashboardPreprocessValidateAIResult(result, table, instruction = "") {
       if (!result || typeof result !== "object") throw new Error("AI结果为空");
       if (result.status === "error") {
         const details = [...(result.missing_fields || []), ...(result.ambiguities || [])].filter(Boolean);
         throw new Error(`${result.error || "AI无法完成当前预处理"}${details.length ? `：${details.join("；")}` : ""}`);
       }
-      if (result.status !== "ok" || !result.target_table) throw new Error("AI结果缺少status=ok或target_table");
-      let headers = Array.isArray(result.target_table.headers) ? result.target_table.headers.map((value) => String(value ?? "").trim()) : [];
-      const rows = Array.isArray(result.target_table.rows) ? result.target_table.rows.map((row) => Array.isArray(row) ? row.map((value) => value === null || value === undefined ? "" : String(value)) : []) : [];
-      if (!headers.length) headers = dashboardPreprocessResolvedHeaders(table.matrix);
-      if (headers.length < 2) headers = [headers[0] || "行索引", "字段_1"];
-      const used = new Map();
-      headers = headers.map((value, index) => {
-        const base = value || (index === 0 ? "行索引" : `字段_${index}`);
-        const count = (used.get(base) || 0) + 1;
-        used.set(base, count);
-        return count === 1 ? base : `${base}_${count}`;
-      });
-      if (!rows.length) throw new Error("AI结果没有数据行");
-      rows.forEach((row, index) => { if (row.length !== headers.length) throw new Error(`AI结果第 ${index + 1} 行列数与表头不一致`); });
+      if (result.status !== "ok") throw new Error("AI结果缺少status=ok");
       const sourceIssues = dashboardPreprocessValidateSourceUsage(result.source_usage);
       if (sourceIssues.length) throw new Error(sourceIssues.join("；"));
-      const matrix = [headers, ...rows];
-      if (matrix.length * headers.length > 250000) throw new Error("AI结果表规模超过浏览器预处理上限");
+      const executionPlan = result.execution_plan;
+      if (!executionPlan || !Array.isArray(executionPlan.operations) || !executionPlan.operations.length) throw new Error("AI结果缺少可执行的execution_plan.operations");
+      if (executionPlan.operations.length > 40) throw new Error("AI执行计划操作数量超过40项，请合并重复步骤");
       const allowRename = /(?:重命名|改名|命名为|名称改为|表名改为)/.test(String(instruction || ""));
+      const operationLabels = executionPlan.operations.map((operation, index) => `${index + 1}.${String(operation?.type || "未命名操作")}`);
       return {
-        matrix,
-        name: allowRename ? (String(result.target_table.name || table.name).trim() || table.name) : table.name,
-        message: String(result.message || "AI预处理完成"),
-        operations: Array.isArray(result.operations) ? result.operations.map(String) : [],
-        sourceUsage: Array.isArray(result.source_usage) ? result.source_usage : []
+        executionPlan,
+        name: allowRename ? (String(result.target_table_name || table.name).trim() || table.name) : table.name,
+        message: String(result.message || "AI已生成本地全量执行计划"),
+        operations: operationLabels,
+        sourceUsage: Array.isArray(result.source_usage) ? result.source_usage : [],
+        warnings: Array.isArray(result.warnings) ? result.warnings.map(String) : []
       };
     }
 
@@ -11711,46 +12641,54 @@
       if (!table?.matrix?.length) return dashboardPreprocessSetMessage("请先导入或新建预处理表。", "error");
       if (instruction.length < 8) return dashboardPreprocessSetMessage("AI预处理逻辑描述过短，请明确关联字段、计算口径和目标列。", "error");
       if (!dashboardPreprocessIsAIEnabled() || typeof window.callConfiguredAI !== "function") return dashboardPreprocessSetMessage("AI尚未启用，请先在设置维护中完成配置和连接测试。", "error");
-      const sourceCatalogue = dashboardPreprocessSourceCatalogue();
-      const payload = {
-        project_id: dashboardState.projectId,
-        instruction,
-        target_table: { tableId: table.id, name: table.name, headers: table.matrix[0], resolved_headers: dashboardPreprocessResolvedHeaders(table.matrix), rows: table.matrix.slice(1) },
-        source_catalogue: sourceCatalogue
-      };
+      const { payload, size, rowCount } = dashboardPreprocessBuildAIPayload(table, instruction);
       const payloadText = JSON.stringify(payload);
-      if (payloadText.length > 2500000) return dashboardPreprocessSetMessage("项目底表上下文超过本次AI请求上限。请减少无关底表或先在数据看板拆分数据后重试。", "error");
-      const original = dashboardClone(table);
+      const beforeAI = dashboardPreprocessTableSnapshot(table);
       dashboardState.preprocessAIRunning = true;
       dashboardElements.preprocessAIButton.classList.add("preprocess-ai-running");
-      dashboardElements.preprocessAIButtonText.textContent = "AI计算中…";
+      dashboardElements.preprocessAIButtonText.textContent = "AI规划中…";
       dashboardPreprocessUpdateGate();
-      dashboardPreprocessSetMessage("正在识别字段、读取项目底表并计算结果。通过校验前不会修改当前表。", "warning");
+      dashboardPreprocessSetMessage(`正在发送字段画像与代表性样本：${rowCount.toLocaleString("zh-CN")}行全量数据不上传，AI上下文${systemFormatBytes(size)}。`, "warning");
       try {
         const content = await window.callConfiguredAI([
           { role: "system", content: preprocessingSkillPrompt() },
           { role: "user", content: payloadText }
-        ], { json: true, thinking: "disabled", maxTokens: 8000 });
+        ], { json: true, thinking: "disabled", maxTokens: 8000, contextLabel: "数据预处理" });
         const result = dashboardPreprocessExtractJson(content);
         const validated = dashboardPreprocessValidateAIResult(result, table, instruction);
-        dashboardPreprocessPushSnapshot("AI处理前", original);
-        const beforeAI = dashboardPreprocessTableSnapshot(original);
+        dashboardElements.preprocessAIButtonText.textContent = "本地全量计算中…";
+        const matrix = await dashboardPreprocessExecutePlan(table, validated.executionPlan, (current, total, type) => {
+          dashboardPreprocessSetMessage(`AI计划已确认，正在本地处理全量数据：第${current}/${total}步 ${type}。当前表${rowCount.toLocaleString("zh-CN")}行。`, "warning");
+        });
+        dashboardState.preprocessing.snapshots.push({
+          id: dashboardId("preprocess-snapshot"),
+          tableId: table.id,
+          tableName: table.name,
+          reason: "AI处理前",
+          matrix: beforeAI.matrix,
+          at: new Date().toISOString(),
+          largeData: rowCount > 50000
+        });
+        const snapshotLimit = rowCount > 50000 ? 2 : 30;
+        if (dashboardState.preprocessing.snapshots.length > snapshotLimit) dashboardState.preprocessing.snapshots.splice(0, dashboardState.preprocessing.snapshots.length - snapshotLimit);
         table.name = validated.name;
-        table.matrix = validated.matrix;
+        table.matrix = matrix;
         table.updatedAt = new Date().toISOString();
         table.lastAIInstruction = instruction;
         table.lastOperations = validated.operations;
         table.sourceUsage = validated.sourceUsage;
-        table.matrix = dashboardPreprocessValidateMatrix(table.matrix);
-        dashboardPreprocessPushAction("AI预处理", table, beforeAI, dashboardPreprocessTableSnapshot(table));
+        const afterAI = dashboardPreprocessTableSnapshot(table);
+        dashboardPreprocessPushAction("AI预处理", table, beforeAI, afterAI);
         dashboardState.processingTouched = true;
+        dashboardState.preprocessRangeCache = null;
         dashboardLog("AI预处理", `${table.name} / ${validated.operations.join("；") || instruction}`);
-        dashboardPreprocessSetMessage(`${validated.message}${validated.operations.length ? `\n执行记录：${validated.operations.join("；")}` : ""}`);
+        const warningText = validated.warnings.length ? `\n提示：${validated.warnings.join("；")}` : "";
+        dashboardPreprocessSetMessage(`${validated.message}。已在浏览器本地完成${Math.max(0, table.matrix.length - 1).toLocaleString("zh-CN")}行全量处理。${validated.operations.length ? `\n执行记录：${validated.operations.join("；")}` : ""}${warningText}`);
         dashboardPreprocessRender();
         dashboardScheduleSave();
         dashboardSyncProjectMetadata();
       } catch (error) {
-        Object.assign(table, original);
+        dashboardPreprocessApplyTableSnapshot(table, beforeAI);
         dashboardPreprocessSetMessage(`AI计算失败：${error.message}。当前预处理表未发生变化。`, "error");
         dashboardPreprocessRender();
       } finally {
@@ -11761,24 +12699,26 @@
       }
     }
 
-    function dashboardPreprocessRender() {
-      dashboardState.preprocessing = dashboardPreprocessNormalizeWorkspace(dashboardState.preprocessing);
+    function dashboardPreprocessRender(options = {}) {
+      if (!options.fromScroll) dashboardState.preprocessing = dashboardPreprocessNormalizeWorkspace(dashboardState.preprocessing);
       const tables = dashboardState.preprocessing.tables;
       const table = dashboardActivePreprocessTable();
       const workspaceName = dashboardState.preprocessing.name || "数据预处理";
-      dashboardElements.preprocessWorkspaceTitle.textContent = workspaceName;
-      dashboardElements.preprocessWorkspaceName.value = workspaceName;
-      dashboardElements.preprocessBoardTitle.textContent = `${workspaceName} · 子表`;
-      dashboardElements.preprocessTableSelect.innerHTML = tables.length
-        ? tables.map((item) => `<option value="${dashboardEscape(item.id)}"${item.id === dashboardState.preprocessing.activeTableId ? " selected" : ""}>${dashboardEscape(item.name)}</option>`).join("")
-        : '<option value="">暂无预处理表</option>';
-      dashboardElements.preprocessTableTabs.innerHTML = tables.length
-        ? tables.map((item) => {
-            const active = item.id === dashboardState.preprocessing.activeTableId;
-            return `<span class="preprocess-tab-item ${active ? "active" : ""}"><button class="dashboard-sheet-tab ${active ? "active" : ""}" type="button" data-preprocess-table-id="${dashboardEscape(item.id)}" title="切换到 ${dashboardEscape(item.name)}">${dashboardEscape(item.name)}</button><button class="preprocess-tab-rename" type="button" data-preprocess-rename-id="${dashboardEscape(item.id)}" title="重命名 ${dashboardEscape(item.name)}" aria-label="重命名 ${dashboardEscape(item.name)}">✎</button></span>`;
-          }).join("")
-        : "";
-      dashboardElements.preprocessTableName.value = table?.name || "";
+      if (!options.fromScroll) {
+        dashboardElements.preprocessWorkspaceTitle.textContent = workspaceName;
+        dashboardElements.preprocessWorkspaceName.value = workspaceName;
+        dashboardElements.preprocessBoardTitle.textContent = `${workspaceName} · 子表`;
+        dashboardElements.preprocessTableSelect.innerHTML = tables.length
+          ? tables.map((item) => `<option value="${dashboardEscape(item.id)}"${item.id === dashboardState.preprocessing.activeTableId ? " selected" : ""}>${dashboardEscape(item.name)}</option>`).join("")
+          : '<option value="">暂无预处理表</option>';
+        dashboardElements.preprocessTableTabs.innerHTML = tables.length
+          ? tables.map((item) => {
+              const active = item.id === dashboardState.preprocessing.activeTableId;
+              return `<span class="preprocess-tab-item ${active ? "active" : ""}"><button class="dashboard-sheet-tab ${active ? "active" : ""}" type="button" data-preprocess-table-id="${dashboardEscape(item.id)}" title="切换到 ${dashboardEscape(item.name)}">${dashboardEscape(item.name)}</button><button class="preprocess-tab-rename" type="button" data-preprocess-rename-id="${dashboardEscape(item.id)}" title="重命名 ${dashboardEscape(item.name)}" aria-label="重命名 ${dashboardEscape(item.name)}">✎</button></span>`;
+            }).join("")
+          : "";
+        dashboardElements.preprocessTableName.value = table?.name || "";
+      }
       if (!table?.matrix?.length) {
         dashboardElements.preprocessHeaderInput.value = "";
         dashboardElements.preprocessFirstColumnInput.value = "";
@@ -11790,20 +12730,48 @@
         dashboardElements.preprocessDimension.textContent = "0 行 × 0 列";
         dashboardElements.preprocessTableDescription.textContent = dashboardState.projectId ? "导入或新建后，可直接在单元格中编辑并自动保存" : "请先关联项目";
         dashboardElements.preprocessWorkspaceMeta.textContent = dashboardState.projectId ? "当前项目尚无预处理表" : "请先关联项目";
-        dashboardPreprocessRenderFieldOptions(null);
+        dashboardState.preprocessVisibleRowCache = null;
+        if (!options.fromScroll) dashboardPreprocessRenderFieldOptions(null);
       } else {
-        const matrix = dashboardPreprocessValidateMatrix(table.matrix);
+        if (dashboardState.lastRenderedPreprocessTableId !== table.id) {
+          dashboardState.lastRenderedPreprocessTableId = table.id;
+          dashboardState.preprocessVirtualStart = 0;
+          dashboardState.preprocessVisibleRowCache = null;
+          dashboardElements.preprocessTableShell.scrollTop = 0;
+        }
+        const matrix = options.fromScroll ? table.matrix : dashboardPreprocessValidateMatrix(table.matrix);
         table.matrix = matrix;
         const actualCols = matrix[0]?.length || 0;
         const displayCols = Math.max(10, actualCols);
         const query = dashboardState.preprocessSearch.trim().toLowerCase();
-        const rowIndexes = dashboardState.preprocessFilter
-          ? dashboardPreprocessVisibleRowIndexes(table)
-          : Array.from({ length: Math.max(21, matrix.length) }, (_, index) => index);
+        const filterKey = dashboardState.preprocessFilter ? JSON.stringify(dashboardState.preprocessFilter) : "";
+        const cacheKey = `${table.id}|${filterKey}|${matrix.length}`;
+        let dataRows = null;
+        if (dashboardState.preprocessFilter) {
+          if (options.fromScroll && dashboardState.preprocessVisibleRowCache?.key === cacheKey) dataRows = dashboardState.preprocessVisibleRowCache.rows;
+          else {
+            dataRows = dashboardPreprocessVisibleRowIndexes(table).filter((rowIndex) => rowIndex > 0);
+            dashboardState.preprocessVisibleRowCache = { key: cacheKey, rows: dataRows };
+          }
+        }
+        const dataCount = dataRows ? dataRows.length : Math.max(20, matrix.length - 1);
+        const virtual = dataCount > SYSTEM_LARGE_DATA_CONFIG.preprocessVirtualThreshold;
+        const virtualRange = virtual
+          ? dashboardVirtualRange(dataCount, dashboardElements.preprocessTableShell, SYSTEM_LARGE_DATA_CONFIG.dashboardRowHeight, SYSTEM_LARGE_DATA_CONFIG.dashboardVirtualOverscan)
+          : { start: 0, end: dataCount };
+        if (options.fromScroll && !options.force && virtual && virtualRange.start === dashboardState.preprocessVirtualStart) return;
+        dashboardState.preprocessVirtualStart = virtualRange.start;
         const resolvedHeaders = dashboardPreprocessResolvedHeaders(matrix);
-        dashboardElements.preprocessHeaderInput.value = dashboardPreprocessAxisText(matrix[0]);
-        dashboardElements.preprocessFirstColumnInput.value = dashboardPreprocessAxisText(matrix.slice(1).map((row) => row[0]));
-        dashboardElements.preprocessTableBody.innerHTML = rowIndexes.map((r) => {
+        if (!options.fromScroll) {
+          dashboardElements.preprocessHeaderInput.value = dashboardPreprocessAxisText(matrix[0]);
+          const firstColumnValues = matrix.slice(1).map((row) => row[0]);
+          const axisPreview = firstColumnValues.length > 500 ? firstColumnValues.slice(0, 200) : firstColumnValues;
+          dashboardElements.preprocessFirstColumnInput.value = table.sourceFirstColumnText || dashboardPreprocessAxisText(axisPreview);
+          dashboardElements.preprocessFirstColumnInput.title = firstColumnValues.length > 500
+            ? `当前表共${firstColumnValues.length}个行首值，输入框仅保留原始导入内容或前200项预览；表格本体仍保留全量数据。`
+            : "";
+        }
+        const renderRow = (r) => {
           const cells = [`<th class="dashboard-row-index">${r + 1}</th>`];
           for (let c = 0; c < displayCols; c += 1) {
             const tag = r === 0 ? "th" : "td";
@@ -11817,22 +12785,36 @@
             cells.push(`<${tag} class="${classes}" contenteditable="true" spellcheck="false" data-pre-r="${r}" data-pre-c="${c}" title="${dashboardEscape(title)}">${dashboardEscape(value)}</${tag}>`);
           }
           return `<tr data-pre-row="${r}">${cells.join("")}</tr>`;
-        }).join("");
+        };
+        const visibleRows = [];
+        for (let position = virtualRange.start; position < virtualRange.end; position += 1) visibleRows.push(dataRows ? dataRows[position] : position + 1);
+        const spacer = (height, name) => height > 0
+          ? `<tr aria-hidden="true" data-virtual-spacer="${name}"><td class="virtual-spacer-cell" colspan="${displayCols + 1}" style="height:${height}px"></td></tr>`
+          : "";
+        dashboardElements.preprocessTableBody.innerHTML = [
+          renderRow(0),
+          virtual ? spacer(virtualRange.start * SYSTEM_LARGE_DATA_CONFIG.dashboardRowHeight, "top") : "",
+          ...visibleRows.map(renderRow),
+          virtual ? spacer((dataCount - virtualRange.end) * SYSTEM_LARGE_DATA_CONFIG.dashboardRowHeight, "bottom") : ""
+        ].join("");
         dashboardElements.preprocessTable.hidden = false;
         dashboardElements.preprocessTable.style.display = "table";
         dashboardElements.preprocessTableEmpty.hidden = true;
         dashboardElements.preprocessTableEmpty.style.display = "none";
-        const range = dashboardPreprocessUsedRange(matrix);
-        dashboardElements.preprocessDimension.textContent = `${range.rows} 行 × ${range.cols} 列`;
-        const filterText = dashboardState.preprocessFilter ? `，当前筛选显示 ${Math.max(0, rowIndexes.length - 1)} 行` : "";
-        dashboardElements.preprocessTableDescription.textContent = `${table.name}${filterText} · 字段和行范围由系统自动识别`;
+        if (!options.fromScroll) dashboardState.preprocessRangeCache = dashboardPreprocessUsedRange(matrix);
+        const usedRange = dashboardState.preprocessRangeCache || { rows: matrix.length, cols: actualCols };
+        dashboardElements.preprocessDimension.innerHTML = `${usedRange.rows} 行 × ${usedRange.cols} 列${virtual ? `<span class="large-data-window-note">窗口化显示 ${virtualRange.start + 1}-${virtualRange.end} / ${dataCount}</span>` : ""}`;
+        const filterText = dashboardState.preprocessFilter ? `，当前筛选显示 ${dataCount} 行` : "";
+        dashboardElements.preprocessTableDescription.textContent = `${table.name}${filterText} · 字段和行范围由系统自动识别${virtual ? " · 窗口化显示不影响全量计算、编辑保存与导出" : ""}`;
         const sourceCount = table.sourceUsage?.length || 0;
         dashboardElements.preprocessWorkspaceMeta.textContent = `更新：${new Date(table.updatedAt).toLocaleString("zh-CN")} · AI来源表 ${sourceCount} 张 · 项目 ${dashboardState.projectId || "—"}`;
-        dashboardPreprocessRenderFieldOptions(table);
+        if (!options.fromScroll) dashboardPreprocessRenderFieldOptions(table);
       }
-      if (dashboardState.preprocessing.lastError) dashboardPreprocessSetMessage(dashboardState.preprocessing.lastError, "error");
-      else if (dashboardState.preprocessing.lastMessage) dashboardPreprocessSetMessage(dashboardState.preprocessing.lastMessage);
-      dashboardPreprocessUpdateGate();
+      if (!options.fromScroll) {
+        if (dashboardState.preprocessing.lastError) dashboardPreprocessSetMessage(dashboardState.preprocessing.lastError, "error");
+        else if (dashboardState.preprocessing.lastMessage) dashboardPreprocessSetMessage(dashboardState.preprocessing.lastMessage);
+        dashboardPreprocessUpdateGate();
+      }
     }
 
     function dashboardPreprocessAsFiles(workspace = dashboardState.preprocessing) {
@@ -11991,6 +12973,14 @@
       dashboardRenderAll();
       dashboardScheduleSave();
     });
+
+    dashboardElements.tableShell.addEventListener("scroll", () => {
+      if (dashboardState.tableScrollFrame) return;
+      dashboardState.tableScrollFrame = requestAnimationFrame(() => {
+        dashboardState.tableScrollFrame = 0;
+        dashboardRenderTable({ fromScroll: true });
+      });
+    }, { passive: true });
 
     dashboardElements.body.addEventListener("click", (event) => {
       const cell = event.target.closest("[data-r][data-c]");
@@ -12273,6 +13263,14 @@
       const table = dashboardActivePreprocessTable();
       if (table) dashboardPreprocessRenameTableById(table.id, dashboardElements.preprocessTableName.value);
     });
+
+    dashboardElements.preprocessTableShell.addEventListener("scroll", () => {
+      if (dashboardState.preprocessScrollFrame) return;
+      dashboardState.preprocessScrollFrame = requestAnimationFrame(() => {
+        dashboardState.preprocessScrollFrame = 0;
+        dashboardPreprocessRender({ fromScroll: true });
+      });
+    }, { passive: true });
 
     dashboardElements.preprocessTableBody.addEventListener("click", (event) => {
       const cell = event.target.closest("[data-pre-r][data-pre-c]");
@@ -13050,7 +14048,7 @@
     function analysisFieldsForSheet(fileId, sheetId) {
       const sheet = analysisSheetById(fileId, sheetId);
       if (!sheet) return [];
-      const maxCols = Math.max(0, ...(sheet.rows || []).map((row) => row.length));
+      const maxCols = systemMaxRowLength(sheet.rows || []);
       return Array.from({ length: maxCols }, (_, index) => {
         const label = analysisCellText(sheet.rows?.[0]?.[index]) || `字段_${index + 1}`;
         return {
@@ -13204,7 +14202,7 @@
       const sheet = analysisSheetById(plan?.primaryFileId, plan?.primarySheetId);
       if (!sheet) return "";
       const rows = sheet.rows?.length || 0;
-      const cols = Math.max(0, ...(sheet.rows || []).map((row) => row.length));
+      const cols = systemMaxRowLength(sheet.rows || []);
       const headers = (sheet.rows?.[0] || []).map((cell) => analysisCellText(cell)).join("|");
       return `${plan.primaryFileId}:${plan.primarySheetId}:${rows}:${cols}:${headers}`;
     }
@@ -13214,7 +14212,7 @@
       analysisState.dataFiles.forEach((file) => {
         (file.sheets || []).forEach((sheet) => {
           const rowCount = Math.max(0, (sheet.rows?.length || 0) - 1);
-          const colCount = Math.max(0, ...(sheet.rows || []).map((row) => row.length));
+          const colCount = systemMaxRowLength(sheet.rows || []);
           views.push({
             id: analysisDataViewId(file.id, sheet.id),
             fileId: file.id,
@@ -14763,26 +15761,44 @@
       analysisScheduleSave();
     }
 
-    function analysisDataCatalogue() {
+    function analysisDataCatalogue(requirement = "") {
+      const requirementText = String(requirement || "").toLowerCase();
+      const tokens = requirementText.split(/[\s,，。；;、：:()（）]+/).filter((item) => item.length >= 2);
       return analysisState.dataFiles.map((file) => ({
         id: file.id,
         name: file.name,
         sheets: (file.sheets || []).map((sheet) => {
-          const fields = analysisFieldsForSheet(file.id, sheet.id).map((field) => {
+          const sourceFields = analysisFieldsForSheet(file.id, sheet.id);
+          const sampleIndexes = systemDeterministicSampleIndices(Math.max(0, (sheet.rows || []).length - 1), 512).map((index) => index + 1);
+          const ranked = sourceFields.map((field, index) => {
+            const name = String(field.label || "").toLowerCase();
+            let score = requirementText.includes(name) ? 1000 : 0;
+            tokens.forEach((token) => { if (name.includes(token)) score += token.length * 5; });
+            return { field, index, score };
+          }).sort((a, b) => b.score - a.score || a.index - b.index);
+          const detailed = new Set(ranked.slice(0, Math.min(160, ranked.length)).map((item) => item.index));
+          const fields = sourceFields.map((field, fieldIndex) => {
             const values = [];
             const seen = new Set();
-            for (const row of (sheet.rows || []).slice(1, 201)) {
-              const value = analysisCellText(row?.[field.index]).trim();
-              if (!value || seen.has(value)) continue;
-              seen.add(value);
-              if (values.length < 12) values.push(value);
-            }
+            let nonEmpty = 0;
+            let numeric = 0;
+            sampleIndexes.forEach((rowIndex) => {
+              const raw = sheet.rows?.[rowIndex]?.[field.index]?.v;
+              const value = analysisCellText(sheet.rows?.[rowIndex]?.[field.index]).trim();
+              if (!value) return;
+              nonEmpty += 1;
+              if (seen.size < 240) seen.add(value);
+              if (detailed.has(fieldIndex) && values.length < 8 && !values.includes(value)) values.push(systemCompactValue(value, 80));
+              if (Number.isFinite(Number(String(raw ?? value).replace(/,/g, "")))) numeric += 1;
+            });
             return {
               id: field.id,
               name: field.label,
               type: field.type,
               sampleValues: values,
-              uniqueCountApprox: seen.size
+              uniqueCountApprox: seen.size >= 240 ? "240+" : seen.size,
+              missingRatioApprox: sampleIndexes.length ? Number(((sampleIndexes.length - nonEmpty) / sampleIndexes.length).toFixed(4)) : 0,
+              numericRatioApprox: nonEmpty ? Number((numeric / nonEmpty).toFixed(4)) : 0
             };
           });
           return {
@@ -14791,6 +15807,8 @@
             name: sheet.logicalName || sheet.name,
             rowCount: Math.max(0, (sheet.rows || []).length - 1),
             columnCount: fields.length,
+            profileBasis: sampleIndexes.length,
+            contextMode: "schema_profile_samples_no_full_rows",
             fields
           };
         })
@@ -14866,24 +15884,70 @@
     async function callConfiguredAI(messages, options = {}) {
       const config = loadAIConfig();
       if (config.status !== "enabled") throw new Error("AI配置尚未通过连接测试");
+      const normalizedMessages = (Array.isArray(messages) ? messages : []).map((message) => ({
+        role: message?.role || "user",
+        content: typeof message?.content === "string" ? message.content : JSON.stringify(message?.content ?? "")
+      }));
+      const contextBytes = systemJsonSize(normalizedMessages);
+      if (contextBytes > SYSTEM_LARGE_DATA_CONFIG.aiHardChars * 1.6) {
+        throw new Error(`AI上下文仍有${systemFormatBytes(contextBytes)}，超过安全上限。系统已阻止发送全量底表，请检查当前模块的压缩摘要。`);
+      }
       const body = {
         model: config.model,
-        messages,
+        messages: normalizedMessages,
         stream: false,
         max_tokens: options.maxTokens || Number(config.maxTokens) || 3500,
         thinking: { type: options.thinking || config.thinking || "disabled" }
       };
       if (options.json) body.response_format = { type: "json_object" };
-      const response = await fetch(aiEndpoint(config.baseUrl), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${config.apiKey}` },
-        body: JSON.stringify(body)
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.error?.message || `HTTP ${response.status}`);
-      const content = payload?.choices?.[0]?.message?.content;
-      if (typeof content !== "string") throw new Error("模型未返回可用内容");
-      return content;
+      const timeoutMs = Math.max(30000, Number(options.timeoutMs) || 180000);
+      const maxAttempts = Math.max(1, Math.min(2, Number(options.attempts) || 2));
+      const startedAt = performance.now();
+      let lastError = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          options.onProgress?.({ phase: "request", attempt, maxAttempts, contextBytes, label: options.contextLabel || "AI请求" });
+          const response = await fetch(aiEndpoint(config.baseUrl), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${config.apiKey}` },
+            body: JSON.stringify(body),
+            signal: controller.signal
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const error = new Error(payload?.error?.message || `HTTP ${response.status}`);
+            error.status = response.status;
+            throw error;
+          }
+          const content = payload?.choices?.[0]?.message?.content;
+          if (typeof content !== "string") throw new Error("模型未返回可用内容");
+          const metrics = {
+            label: options.contextLabel || "AI请求",
+            contextBytes,
+            responseBytes: new Blob([content]).size,
+            elapsedMs: Math.round(performance.now() - startedAt),
+            attempt,
+            model: config.model,
+            usage: payload?.usage || null,
+            at: new Date().toISOString()
+          };
+          window.__lastAIRequestStats = metrics;
+          window.dispatchEvent(new CustomEvent("ai-request-metrics", { detail: metrics }));
+          options.onProgress?.({ phase: "response", ...metrics });
+          return content;
+        } catch (error) {
+          lastError = error?.name === "AbortError" ? new Error(`AI请求超过${Math.round(timeoutMs / 1000)}秒，已终止`) : error;
+          const retryable = error?.name === "AbortError" || [408, 429, 500, 502, 503, 504].includes(Number(error?.status));
+          if (!retryable || attempt >= maxAttempts) break;
+          options.onProgress?.({ phase: "retry", attempt, maxAttempts, error: lastError.message, contextBytes });
+          await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      throw lastError || new Error("AI请求失败");
     }
 
     window.callConfiguredAI = callConfiguredAI;
@@ -15617,13 +16681,16 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
             descriptiveMetrics: plan.descriptiveMetrics, chartMode: plan.chartMode, charts: plan.charts, chartConfigs: plan.chartConfigs,
             tableFormat: plan.tableFormat, variableNote: plan.variableNote, chartNote: plan.chartNote
           })),
-          data_catalogue: analysisDataCatalogue()
+          data_catalogue: analysisDataCatalogue(requirement)
         };
         const requestPlans = async (payload) => {
+          const payloadText = JSON.stringify(payload);
+          const contextSize = systemJsonSize(payloadText);
+          analysisSetMessage(`正在使用字段目录、数据画像与代表性样本生成方案。全量底表不上传，当前上下文 ${systemFormatBytes(contextSize)}。`, "warning");
           const content = await callConfiguredAI([
             { role: "system", content: analysisSkillPrompt() },
-            { role: "user", content: JSON.stringify(payload) }
-          ], { json: true, thinking: "disabled" });
+            { role: "user", content: payloadText }
+          ], { json: true, thinking: "disabled", contextLabel: "方案设计" });
           return analysisExtractJson(content);
         };
 
@@ -15664,7 +16731,7 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
               assumptionPolicy: plan.assumptionPolicy, chartMode: plan.chartMode, charts: plan.charts, chartConfigs: plan.chartConfigs,
               tableFormat: plan.tableFormat, variableNote: plan.variableNote, chartNote: plan.chartNote
             })),
-            data_catalogue: analysisDataCatalogue()
+            data_catalogue: analysisDataCatalogue(requirement)
           });
           if (result.status === "needs_clarification" || !Array.isArray(result.plans) || !result.plans.length) {
             const missing = Array.isArray(result.missing_information) ? result.missing_information : validation.flatMap((item) => item.issues);
@@ -16901,6 +17968,7 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       codeAudit: null,
       currentResult: null,
       currentTables: [],
+      resultTablePages: {},
       currentError: "",
       stages: Object.fromEntries(EXECUTION_STAGE_DEFS.map(([code]) => [code, { status: "pending", detail: "等待开始" }]))
     };
@@ -17137,6 +18205,7 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       const fresh = Boolean(run?.result && plan && (!run.planSignature || run.planSignature === executionPlanSignature(plan)));
       executionState.currentResult = fresh ? executionClone(run.result) : null;
       executionState.currentTables = fresh && Array.isArray(run?.tables) ? executionClone(run.tables) : [];
+      executionState.resultTablePages = {};
       executionState.currentError = "";
       if (fresh && run?.runAt) executionSetRunState(`已保存 · ${new Date(run.runAt).toLocaleString("zh-CN", { hour12: false })}`, "success");
       return fresh ? run : null;
@@ -17280,7 +18349,7 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
     function executionCellRaw(cell) { return cell?.v === undefined || cell?.v === null ? "" : cell.v; }
     function executionCellText(cell) { return cell?.w !== undefined && cell?.w !== null && cell?.w !== "" ? String(cell.w) : String(executionCellRaw(cell)); }
     function executionHeaders(sheet) {
-      const maxCols = Math.max(0, ...(sheet?.rows || []).map((row) => row.length));
+      const maxCols = systemMaxRowLength(sheet?.rows || []);
       return Array.from({ length: maxCols }, (_, index) => executionCellText(sheet?.rows?.[0]?.[index]).trim() || `字段_${index + 1}`);
     }
     function executionFields(plan) {
@@ -17419,7 +18488,7 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       const sheet = executionSheet(plan);
       if (!sheet) return "";
       const rows = sheet.rows?.length || 0;
-      const cols = Math.max(0, ...(sheet.rows || []).map((row) => row.length));
+      const cols = systemMaxRowLength(sheet.rows || []);
       const headers = (sheet.rows?.[0] || []).map((cell) => executionCellText(cell)).join("|");
       return `${plan.primaryFileId}:${plan.primarySheetId}:${rows}:${cols}:${headers}`;
     }
@@ -18119,7 +19188,11 @@ function exportResultTable(table, index = 0) {
   if (typeof XLSX !== "undefined") {
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.aoa_to_sheet(aoa);
-    worksheet["!cols"] = table.columns.map((column, columnIndex) => ({ wch: Math.min(42, Math.max(String(column).length + 4, ...table.rows.map((row) => String(row[columnIndex] ?? "").length + 2))) }));
+    worksheet["!cols"] = table.columns.map((column, columnIndex) => {
+      let width = String(column).length + 4;
+      for (let rowIndex = 0; rowIndex < table.rows.length; rowIndex += 1) width = Math.max(width, String(table.rows[rowIndex]?.[columnIndex] ?? "").length + 2);
+      return { wch: Math.min(42, width) };
+    });
     XLSX.utils.book_append_sheet(workbook, worksheet, "结果" + (index + 1));
     XLSX.writeFile(workbook, safeName + ".xlsx");
     return;
@@ -19098,35 +20171,66 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     }
 
     function executionValidationRows(plan) {
-      const rows = executionRows(plan);
-      const budget = executionValidationRuntimeBudget(plan, rows.length);
-      if (rows.length <= budget.maxRows) return { rows, budget };
+      const sheet = executionSheet(plan), headers = executionHeaders(sheet);
+      const sourceRows = Array.isArray(sheet?.rows) ? sheet.rows : [];
+      const validIndexes = [];
+      for (let sourceIndex = 1; sourceIndex < sourceRows.length; sourceIndex += 1) {
+        const row = sourceRows[sourceIndex] || [];
+        if (row.some((cell) => executionNonEmpty(executionCellRaw(cell)))) validIndexes.push(sourceIndex);
+      }
+      const budget = executionValidationRuntimeBudget(plan, validIndexes.length);
+      const toRuntimeRow = (sourceIndex) => ({
+        __rowIndex: sourceIndex + 1,
+        values: headers.map((_, columnIndex) => executionCellRaw(sourceRows[sourceIndex]?.[columnIndex]))
+      });
+      if (validIndexes.length <= budget.maxRows) return { rows: validIndexes.map(toRuntimeRow), budget };
       const groupFieldId = (plan?.groupVars || [])[0] || (plan?.targetScope === "specified" ? plan?.subjectField : "") || (plan?.independentVars || [])[0] || "";
       const groupIndex = groupFieldId ? executionFieldIndex(groupFieldId) : -1;
+      let selectedIndexes = [];
       if (groupIndex >= 0) {
         const buckets = new Map();
-        rows.forEach((row) => {
-          const key = String(row?.values?.[groupIndex] ?? "");
+        validIndexes.forEach((sourceIndex) => {
+          const key = String(executionCellRaw(sourceRows[sourceIndex]?.[groupIndex]) ?? "");
           if (!buckets.has(key)) buckets.set(key, []);
-          buckets.get(key).push(row);
+          buckets.get(key).push(sourceIndex);
         });
-        const keys = [...buckets.keys()];
-        const perGroup = Math.max(8, Math.floor(budget.maxRows / Math.max(1, keys.length)));
-        const sampled = [];
-        keys.forEach((key) => {
-          const bucket = buckets.get(key) || [];
-          if (bucket.length <= perGroup) sampled.push(...bucket);
-          else {
-            const step = bucket.length / perGroup;
-            for (let index = 0; index < perGroup; index += 1) sampled.push(bucket[Math.min(bucket.length - 1, Math.floor(index * step))]);
-          }
+        const perGroup = Math.max(8, Math.floor(budget.maxRows / Math.max(1, buckets.size)));
+        buckets.forEach((bucket) => {
+          const positions = systemDeterministicSampleIndices(bucket.length, Math.min(perGroup, bucket.length));
+          positions.forEach((position) => selectedIndexes.push(bucket[position]));
         });
-        return { rows: sampled.slice(0, budget.maxRows), budget };
+        selectedIndexes = selectedIndexes.slice(0, budget.maxRows);
+      } else {
+        selectedIndexes = systemDeterministicSampleIndices(validIndexes.length, budget.maxRows).map((index) => validIndexes[index]);
       }
-      const sampled = [];
-      const step = rows.length / budget.maxRows;
-      for (let index = 0; index < budget.maxRows; index += 1) sampled.push(rows[Math.min(rows.length - 1, Math.floor(index * step))]);
-      return { rows: sampled, budget };
+      return { rows: selectedIndexes.map(toRuntimeRow), budget };
+    }
+
+    function executionCompactValidationFixture(plan, rows, maxRows = 96, maxFields = 80) {
+      const fields = executionFields(plan);
+      const planText = JSON.stringify(plan || {});
+      const selected = [];
+      fields.forEach((field) => {
+        if (planText.includes(field.id) && selected.length < maxFields) selected.push(field);
+      });
+      fields.forEach((field) => {
+        if (selected.length < maxFields && !selected.some((item) => item.id === field.id)) selected.push(field);
+      });
+      const indexes = systemDeterministicSampleIndices(rows.length, Math.min(maxRows, rows.length));
+      return {
+        projection: selected.map((field) => ({ id: field.id, label: field.label, index: field.index, type: field.type })),
+        source_row_count: rows.length,
+        rows: indexes.map((rowIndex) => {
+          const row = rows[rowIndex] || {};
+          const values = Array.isArray(row.values) ? row.values : (Array.isArray(row) ? row : []);
+          const output = { __rowIndex: row.__rowIndex ?? rowIndex + 1 };
+          selected.forEach((field) => {
+            const value = values.length ? values[field.index] : (row[field.id] ?? row[field.label]);
+            output[field.id] = systemCompactValue(value, 120);
+          });
+          return output;
+        })
+      };
     }
 
     async function executionValidateGeneratedCandidate(candidate, plan, projectId, artifactKey) {
@@ -19330,19 +20434,20 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
             contract: methodReportingContract,
             rule: "同一方法必须按固定key、固定顺序和固定含义完整返回全部required字段，不得只报告p值或只报告效应量"
           },
-          performance: ["禁止无界循环、事件等待、顶层自执行和重复全量扫描", "迭代算法必须有maxIterations和收敛阈值", `代表性验收样本上限=${executionValidationRuntimeBudget(requestPlan, executionRows(requestPlan).length).maxRows}`],
+          performance: ["禁止无界循环、事件等待、顶层自执行和重复全量扫描", "迭代算法必须有maxIterations和收敛阈值", `代表性验收样本上限=${executionValidationRuntimeBudget(requestPlan, Math.max(0, (executionSheet(requestPlan)?.rows || []).length - 1)).maxRows}`],
           comments: ["至少六个中文区块注释", "每个自定义统计函数前写明用途"],
           returnShape: ["result.statistics", "result.effectiveRows", "result.notes", "usedRows", "method", "artifactKey"],
           systemOutput: ["描述统计表", analysisResultContract.required ? "analysis_result表" : "无需analysis_result表", `图表数=${blueprint.charts.length}`, "图表顺序、类型、config和data与蓝图一致", "箱线图保留真实观测值和上下须"]
         };
         const validationFixture = executionValidationRows(requestPlan);
+        const compactValidationFixture = executionCompactValidationFixture(requestPlan, validationFixture.rows);
         const basePayload = {
           mode,
           project_id: requestProjectId,
           artifact_key: requestArtifactKey,
           plan: requestPlan,
           plan_signature: requestPlanSignature,
-          data_schema: executionFields(requestPlan),
+          data_schema: executionFields(requestPlan).map((field) => ({ id: field.id, label: field.label, index: field.index, type: field.type })),
           binding_contract: executionPlanBindingContract(requestPlan, requestProjectId),
           system_validation: validation.checks,
           knowledge: kb ? { label: kb.label, summary: kb.summary, logic: kb.logic, assumptions: kb.assumptions, formulas: kb.formulas, steps: kb.steps, reporting: kb.reporting, reportingContract: methodReportingContract, cautions: kb.cautions } : null,
@@ -19366,7 +20471,10 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
           runtime_budget: validationFixture.budget,
           runtime_test_fixture: {
             row_shape: "runtimeInput.rows中的每行可能为{values:any[]}、普通数组或字段ID/字段名对象",
-            rows: executionClone(validationFixture.rows.slice(0, Math.min(96, validationFixture.rows.length))),
+            rows: compactValidationFixture.rows,
+            field_projection: compactValidationFixture.projection,
+            source_row_count: compactValidationFixture.source_row_count,
+            context_mode: "selected_fields_representative_rows_no_full_dataset",
             expected_chart_count: blueprint.charts.length,
             expected_charts: blueprint.charts,
             expected_table_kinds: blueprint.tables.map((table) => table.kind)
@@ -19385,6 +20493,8 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
           }
         };
 
+        const aiContextBytes = systemJsonSize(basePayload);
+        executionSetMessage(`AI仅接收方案、字段绑定和代表性验收样本，不上传完整底表。源数据约 ${compactValidationFixture.source_row_count.toLocaleString("zh-CN")} 行，验收样本 ${compactValidationFixture.rows.length} 行，上下文 ${systemFormatBytes(aiContextBytes)}。`, aiContextBytes > SYSTEM_LARGE_DATA_CONFIG.aiSoftChars ? "warning" : "");
         let result = null;
         let candidate = "";
         let verification = null;
@@ -19402,7 +20512,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
           const content = await callConfiguredAI([
             { role: "system", content: repairMode ? executionRepairSkillPrompt() : executionSkillPrompt() },
             { role: "user", content: JSON.stringify(requestPayload) }
-          ], { json: false, thinking: "disabled", maxTokens: 22000 });
+          ], { json: false, thinking: "disabled", maxTokens: 22000, contextLabel: "分析执行" });
 
           if (executionState.activeAIRequestId !== requestId || executionState.projectId !== requestProjectId || executionState.selectedPlanId !== requestPlanId || executionPlanSignature(executionSelectedPlan()) !== requestPlanSignature) {
             throw new Error("AI返回时项目、方案或方案内容已变化，本次结果已丢弃，未写入任何方案");
@@ -19527,7 +20637,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     function executionResult({cards=[],columns=[],rows=[],notes=[],chart=null,caption=""}){return {cards,columns,rows,notes,chart,caption};}
     function executionCard(label,value,note=""){return {label,value:String(value),note};}
 
-    function executionRunDescriptive(plan,rows){const ids=(plan.dependentVars||[]).length?plan.dependentVars:executionHeaders(executionSheet(plan)).map((_,index)=>`${plan.primaryFileId}::${plan.primarySheetId}::${index}`).filter((id)=>executionFieldValues(rows,id,true).length>=Math.max(2,Math.ceil(rows.length*.5)));const table=[];for(const id of ids){const values=executionFieldValues(rows,id,true);if(!values.length)continue;table.push({variable:executionFieldLabel(id,plan),n:values.length,missing:rows.length-values.length,sum:exSum(values),mean:exMean(values),median:exMedian(values),sd:exSd(values),min:Math.min(...values),q1:exQuantile(values,.25),q3:exQuantile(values,.75),max:Math.max(...values)});}if(!table.length)throw new Error("未找到可计算的数值变量");return executionResult({cards:[executionCard("有效记录",rows.length),executionCard("分析变量",table.length),executionCard("平均缺失率",`${executionFormatNumber(exMean(table.map((r)=>r.missing/rows.length))*100,2)}%`),executionCard("执行方法","描述统计汇总")],columns:["变量","有效值","缺失值","总和","平均值","中位数","标准差","最小值","Q1","Q3","最大值"],rows:table.map((r)=>[r.variable,r.n,r.missing,...[r.sum,r.mean,r.median,r.sd,r.min,r.q1,r.q3,r.max].map((v)=>executionFormatNumber(v))]),notes:["结果基于限定条件后的有效记录计算。","标准差采用样本标准差，分母为 n−1。"],chart:{type:"bar",labels:table.map((r)=>r.variable),values:table.map((r)=>r.mean)},caption:"各变量平均值"});}
+    function executionRunDescriptive(plan,rows){const ids=(plan.dependentVars||[]).length?plan.dependentVars:executionHeaders(executionSheet(plan)).map((_,index)=>`${plan.primaryFileId}::${plan.primarySheetId}::${index}`).filter((id)=>executionFieldValues(rows,id,true).length>=Math.max(2,Math.ceil(rows.length*.5)));const table=[];for(const id of ids){const values=executionFieldValues(rows,id,true);if(!values.length)continue;table.push({variable:executionFieldLabel(id,plan),n:values.length,missing:rows.length-values.length,sum:exSum(values),mean:exMean(values),median:exMedian(values),sd:exSd(values),min:systemArrayMin(values,0),q1:exQuantile(values,.25),q3:exQuantile(values,.75),max:systemArrayMax(values,0)});}if(!table.length)throw new Error("未找到可计算的数值变量");return executionResult({cards:[executionCard("有效记录",rows.length),executionCard("分析变量",table.length),executionCard("平均缺失率",`${executionFormatNumber(exMean(table.map((r)=>r.missing/rows.length))*100,2)}%`),executionCard("执行方法","描述统计汇总")],columns:["变量","有效值","缺失值","总和","平均值","中位数","标准差","最小值","Q1","Q3","最大值"],rows:table.map((r)=>[r.variable,r.n,r.missing,...[r.sum,r.mean,r.median,r.sd,r.min,r.q1,r.q3,r.max].map((v)=>executionFormatNumber(v))]),notes:["结果基于限定条件后的有效记录计算。","标准差采用样本标准差，分母为 n−1。"],chart:{type:"bar",labels:table.map((r)=>r.variable),values:table.map((r)=>r.mean)},caption:"各变量平均值"});}
     function executionRunIndependentT(plan,rows){const yId=plan.dependentVars[0],gId=plan.groupVars[0]||plan.independentVars[0];const pairs=rows.map((row)=>({y:executionNumeric(row.values[executionFieldIndex(yId)]),g:String(row.values[executionFieldIndex(gId)]??"")})).filter((r)=>Number.isFinite(r.y)&&r.g!=="");const groups=[...new Set(pairs.map((r)=>r.g))];if(groups.length!==2)throw new Error(`独立样本 t 检验需要恰好两个组，当前识别 ${groups.length} 个组`);const a=pairs.filter((r)=>r.g===groups[0]).map((r)=>r.y),b=pairs.filter((r)=>r.g===groups[1]).map((r)=>r.y),ma=exMean(a),mb=exMean(b),va=exVariance(a),vb=exVariance(b),se=Math.sqrt(va/a.length+vb/b.length),t=(ma-mb)/se,df=(va/a.length+vb/b.length)**2/((va/a.length)**2/(a.length-1)+(vb/b.length)**2/(b.length-1)),p=exTPValue(t,df),sp=Math.sqrt(((a.length-1)*va+(b.length-1)*vb)/(a.length+b.length-2)),d=(ma-mb)/sp,J=1-3/(4*(a.length+b.length)-9),g=d*J;return executionResult({cards:[executionCard("均值差",executionFormatNumber(ma-mb)),executionCard("t",executionFormatNumber(t)),executionCard("p",executionFormatP(p)),executionCard("Hedges g",executionFormatNumber(g))],columns:["组别","n","平均值","标准差"],rows:[[groups[0],a.length,executionFormatNumber(ma),executionFormatNumber(Math.sqrt(va))],[groups[1],b.length,executionFormatNumber(mb),executionFormatNumber(Math.sqrt(vb))]],notes:[`Welch t(${executionFormatNumber(df,2)}) = ${executionFormatNumber(t,3)}，p ${executionFormatP(p)}。`,`Hedges g = ${executionFormatNumber(g,3)}，正负方向由“${groups[0]}−${groups[1]}”决定。`],chart:{type:"bar",labels:groups,values:[ma,mb]},caption:"两组均值比较"});}
     function executionRunPairedT(plan,rows){let ids=plan.dependentVars.slice(0,2);if(ids.length<2)throw new Error("配对样本 t 检验需要两个数值测量字段");const pairs=executionPairedValues(rows,ids,true),a=pairs.map((v)=>v[0]),b=pairs.map((v)=>v[1]),d=pairs.map((v)=>v[0]-v[1]),md=exMean(d),sd=exSd(d),se=sd/Math.sqrt(d.length),t=md/se,df=d.length-1,p=exTPValue(t,df),dz=md/sd;return executionResult({cards:[executionCard("配对样本",d.length),executionCard("平均差",executionFormatNumber(md)),executionCard("p",executionFormatP(p)),executionCard("Cohen dz",executionFormatNumber(dz))],columns:["测量","平均值","标准差"],rows:[[executionFieldLabel(ids[0],plan),executionFormatNumber(exMean(a)),executionFormatNumber(exSd(a))],[executionFieldLabel(ids[1],plan),executionFormatNumber(exMean(b)),executionFormatNumber(exSd(b))]],notes:[`t(${df}) = ${executionFormatNumber(t,3)}，p ${executionFormatP(p)}。`,`差值方向为“${executionFieldLabel(ids[0],plan)}−${executionFieldLabel(ids[1],plan)}”。`],chart:{type:"bar",labels:ids.map((id)=>executionFieldLabel(id,plan)),values:[exMean(a),exMean(b)]},caption:"配对测量均值"});}
     function executionRunOneWayAnova(plan,rows){const yId=plan.dependentVars[0],gId=plan.groupVars[0]||plan.independentVars[0];const pairs=rows.map((row)=>({y:executionNumeric(row.values[executionFieldIndex(yId)]),g:String(row.values[executionFieldIndex(gId)]??"")})).filter((r)=>Number.isFinite(r.y)&&r.g!=="");const labels=[...new Set(pairs.map((r)=>r.g))],groups=labels.map((label)=>pairs.filter((r)=>r.g===label).map((r)=>r.y));if(groups.length<2)throw new Error("单因素方差分析至少需要两个组");const all=groups.flat(),grand=exMean(all),ssb=groups.reduce((sum,g)=>sum+g.length*(exMean(g)-grand)**2,0),ssw=groups.reduce((sum,g)=>sum+g.reduce((s,v)=>s+(v-exMean(g))**2,0),0),dfb=groups.length-1,dfw=all.length-groups.length,F=(ssb/dfb)/(ssw/dfw),p=exFPValue(F,dfb,dfw),eta=ssb/(ssb+ssw),omega=(ssb-dfb*(ssw/dfw))/(ssb+ssw+ssw/dfw);return executionResult({cards:[executionCard("F",executionFormatNumber(F)),executionCard("p",executionFormatP(p)),executionCard("η²",executionFormatNumber(eta)),executionCard("ω²",executionFormatNumber(omega))],columns:["组别","n","平均值","标准差"],rows:labels.map((label,i)=>[label,groups[i].length,executionFormatNumber(exMean(groups[i])),executionFormatNumber(exSd(groups[i]))]),notes:[`F(${dfb}, ${dfw}) = ${executionFormatNumber(F,3)}，p ${executionFormatP(p)}。`,`组间效应量 η² = ${executionFormatNumber(eta,3)}，ω² = ${executionFormatNumber(omega,3)}。`],chart:{type:"bar",labels,values:groups.map(exMean)},caption:"各组均值"});}
@@ -19613,10 +20723,10 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
         median: ["中位数", (values) => exMedian(values)],
         std_dev: ["标准差", (values) => exSd(values)],
         variance: ["方差", (values) => exVariance(values)],
-        min: ["最小值", (values) => Math.min(...values)],
+        min: ["最小值", (values) => systemArrayMin(values, 0)],
         q1: ["Q1", (values) => exQuantile(values, .25)],
         q3: ["Q3", (values) => exQuantile(values, .75)],
-        max: ["最大值", (values) => Math.max(...values)]
+        max: ["最大值", (values) => systemArrayMax(values, 0)]
       };
       const selected = metricCodes.filter((code) => metricMap[code]);
       const segments = [];
@@ -19800,15 +20910,26 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       const tables = Array.isArray(executionState.currentTables) && executionState.currentTables.length
         ? executionState.currentTables
         : executionResultTablesFromResult(result, executionSelectedPlan());
-      executionElements.resultTables.innerHTML = tables.map((table, index) => `<article class="execution-result-table-card"><div class="execution-result-table-head"><div><strong>${executionEscape(table.title)}</strong><span>${executionEscape(table.description)}</span></div><button class="analysis-button" type="button" data-execution-export-table="${index}">导出Excel</button></div><div class="execution-table-scroll"><table class="execution-table"><thead><tr>${table.columns.map((column) => `<th>${executionEscape(column)}</th>`).join("")}</tr></thead><tbody>${table.rows.map((row) => `<tr>${row.map((cell) => `<td>${executionEscape(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div></article>`).join("");
-      executionElements.resultTables.dataset.tables = JSON.stringify(tables);
+      const pageSize = SYSTEM_LARGE_DATA_CONFIG.resultPageSize;
+      executionElements.resultTables.innerHTML = tables.map((table, index) => {
+        const rows = Array.isArray(table.rows) ? table.rows : [];
+        const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+        const currentPage = Math.max(1, Math.min(pageCount, Number(executionState.resultTablePages[index]) || 1));
+        executionState.resultTablePages[index] = currentPage;
+        const pageRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+        const pagination = rows.length > pageSize
+          ? `<div class="result-table-pagination"><span>共 ${rows.length.toLocaleString()} 行，当前显示第 ${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, rows.length)} 行</span><div><button class="analysis-button" type="button" data-execution-table-page="${index}" data-direction="prev" ${currentPage <= 1 ? "disabled" : ""}>上一页</button><span>${currentPage}/${pageCount}</span><button class="analysis-button" type="button" data-execution-table-page="${index}" data-direction="next" ${currentPage >= pageCount ? "disabled" : ""}>下一页</button></div></div>`
+          : "";
+        return `<article class="execution-result-table-card"><div class="execution-result-table-head"><div><strong>${executionEscape(table.title)}</strong><span>${executionEscape(table.description)}</span></div><button class="analysis-button" type="button" data-execution-export-table="${index}">导出Excel</button></div><div class="execution-table-scroll"><table class="execution-table"><thead><tr>${table.columns.map((column) => `<th>${executionEscape(column)}</th>`).join("")}</tr></thead><tbody>${pageRows.map((row) => `<tr>${row.map((cell) => `<td>${executionEscape(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${pagination}</article>`;
+      }).join("");
       executionElements.resultTables.hidden = false;
       executionElements.resultEmpty.hidden = true;
     }
 
     function executionExportTable(index) {
-      let tables = [];
-      try { tables = JSON.parse(executionElements.resultTables.dataset.tables || "[]"); } catch (error) {}
+      const tables = Array.isArray(executionState.currentTables) && executionState.currentTables.length
+        ? executionState.currentTables
+        : executionResultTablesFromResult(executionState.currentResult, executionSelectedPlan());
       const table = tables[index];
       if (!table) return;
       const aoa = [table.columns, ...table.rows];
@@ -19817,7 +20938,11 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       if (window.XLSX) {
         const workbook = XLSX.utils.book_new();
         const worksheet = XLSX.utils.aoa_to_sheet(aoa);
-        if (worksheet["!cols"] === undefined) worksheet["!cols"] = table.columns.map((column, columnIndex) => ({ wch: Math.min(42, Math.max(String(column).length + 4, ...table.rows.map((row) => String(row[columnIndex] ?? "").length + 2))) }));
+        if (worksheet["!cols"] === undefined) worksheet["!cols"] = table.columns.map((column, columnIndex) => {
+          let width = String(column).length + 4;
+          for (let rowIndex = 0; rowIndex < table.rows.length; rowIndex += 1) width = Math.max(width, String(table.rows[rowIndex]?.[columnIndex] ?? "").length + 2);
+          return { wch: Math.min(42, width) };
+        });
         XLSX.utils.book_append_sheet(workbook, worksheet, `结果${index + 1}`);
         XLSX.writeFile(workbook, `${safeName}.xlsx`);
         return;
@@ -19879,6 +21004,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       executionState.running = true;
       executionState.currentResult = null;
       executionState.currentTables = [];
+      executionState.resultTablePages = {};
       executionState.currentError = "";
       executionRenderResults();
       executionUpdateGate();
@@ -19892,7 +21018,8 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       try {
         await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 20)));
         const closedLoop = executionExecuteClosedLoop(plan, executionRows(plan));
-        executionState.currentResult = closedLoop.result;
+        const storedResult = systemResultForStorage(closedLoop.result);
+        executionState.currentResult = storedResult;
         executionState.currentTables = closedLoop.tables;
         const runAt = new Date().toISOString();
         const runSnapshot = {
@@ -19907,9 +21034,11 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
           source: executionState.generatedCode ? "analysis_execution_with_ai_artifact" : "analysis_execution_builtin",
           method: methodCode,
           usedRows: closedLoop.usedRows,
-          result: executionClone(closedLoop.result),
+          result: executionClone(storedResult),
           tables: executionClone(closedLoop.tables),
-          charts: Array.isArray(closedLoop.result?.charts) ? executionClone(closedLoop.result.charts) : (closedLoop.result?.chart ? [{ id: "chart_1", title: closedLoop.result.caption || "分析图表", ...executionClone(closedLoop.result.chart) }] : [])
+          charts: Array.isArray(closedLoop.result?.charts)
+            ? closedLoop.result.charts.map((chart) => systemCompactChartForAI(chart, SYSTEM_LARGE_DATA_CONFIG.chartStoragePoints))
+            : (closedLoop.result?.chart ? [systemCompactChartForAI({ id: "chart_1", title: closedLoop.result.caption || "分析图表", ...closedLoop.result.chart }, SYSTEM_LARGE_DATA_CONFIG.chartStoragePoints)] : [])
         };
         executionState.planRuns[executionArtifactKey(plan.id, executionState.projectId)] = runSnapshot;
         executionSetStage("execute", "success", `完整计算闭环完成，使用 ${closedLoop.usedRows} 条记录并生成 ${closedLoop.tables.length} 张结果表`);
@@ -19992,7 +21121,17 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     executionElements.aiGenerate.addEventListener("click", () => executionRunAI("generate"));
     executionElements.aiRegenerate?.addEventListener("click", () => executionRunAI("regenerate"));
     executionElements.aiCheck.addEventListener("click", () => executionRunAI("check"));
-    executionElements.resultTables.addEventListener("click", (event) => { const button = event.target.closest("[data-execution-export-table]"); if (button) executionExportTable(Number(button.dataset.executionExportTable)); });
+    executionElements.resultTables.addEventListener("click", (event) => {
+      const exportButton = event.target.closest("[data-execution-export-table]");
+      if (exportButton) { executionExportTable(Number(exportButton.dataset.executionExportTable)); return; }
+      const pageButton = event.target.closest("[data-execution-table-page]");
+      if (pageButton) {
+        const index = Number(pageButton.dataset.executionTablePage);
+        const current = Number(executionState.resultTablePages[index]) || 1;
+        executionState.resultTablePages[index] = Math.max(1, current + (pageButton.dataset.direction === "next" ? 1 : -1));
+        executionRenderResults();
+      }
+    });
 
     let executionRepositoryRefreshTimer = null;
     window.addEventListener("dataAnalysisAgent:project-updated", (event) => {
@@ -20110,7 +21249,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     function reportRows(plan = reportPlan()) {
       const sheet = reportSheet(plan);
       if (!sheet) return [];
-      const maxCols = Math.max(0, ...(sheet.rows || []).map((row) => row.length));
+      const maxCols = systemMaxRowLength(sheet.rows || []);
       return (sheet.rows || []).slice(1).map((row, rowIndex) => ({
         __rowIndex: rowIndex + 2,
         values: Array.from({ length: maxCols }, (_, index) => executionCellRaw(row?.[index]))
@@ -20125,7 +21264,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       const sheet = reportSheet(plan);
       if (!sheet) return "";
       const rows = sheet.rows?.length || 0;
-      const cols = Math.max(0, ...(sheet.rows || []).map((row) => row.length));
+      const cols = systemMaxRowLength(sheet.rows || []);
       const headers = (sheet.rows?.[0] || []).map((cell) => executionCellText(cell)).join("|");
       return `${plan.primaryFileId}:${plan.primarySheetId}:${rows}:${cols}:${headers}`;
     }
@@ -20161,7 +21300,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
         for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619) >>> 0;
         hash = Math.imul(hash ^ 31, 16777619) >>> 0;
       }));
-      return `${rows.length}:${Math.max(0, ...rows.map((row) => row.values.length))}:${hash.toString(16).padStart(8, "0")}`;
+      return `${rows.length}:${rows.reduce((max, row) => Math.max(max, Array.isArray(row?.values) ? row.values.length : 0), 0)}:${hash.toString(16).padStart(8, "0")}`;
     }
 
     function reportOpenDb() {
@@ -20471,7 +21610,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       if (code === "histogram") {
         const values = numbers(rows, valueField);
         if (!values.length) return { labels: [], values: [] };
-        const min = Math.min(...values), max = Math.max(...values);
+        const min = systemArrayMin(values, 0), max = systemArrayMax(values, 0);
         if (min === max) return { labels: [executionFormatNumber(min)], values: [values.length] };
         const count = Math.max(4, Math.min(12, Math.ceil(Math.sqrt(values.length)))), width = (max - min) / count, frequency = Array(count).fill(0);
         values.forEach((value) => frequency[Math.min(count - 1, Math.floor((value - min) / width))] += 1);
@@ -20657,7 +21796,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       const numeric = (values) => (values || []).map(Number).filter(Number.isFinite);
       const scale = (values) => {
         const nums = numeric(values);
-        const min = Math.min(0, ...(nums.length ? nums : [0])), max = Math.max(1, ...(nums.length ? nums : [1]));
+        const min = Math.min(0, systemArrayMin(nums, 0)), max = Math.max(1, systemArrayMax(nums, 1));
         const span = max - min || 1;
         return { min, max, y: (value) => top + plotH - ((Number(value) - min) / span) * plotH };
       };
@@ -20698,7 +21837,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       if (["scatter", "scatterFit", "probability"].includes(chart.type)) {
         const x = chart.type === "probability" ? (chart.values || []).map((_, i) => i + 1) : (chart.x || []);
         const y = chart.type === "probability" ? (chart.values || []) : (chart.y || []);
-        const nx = numeric(x), ny = numeric(y), minX = Math.min(...(nx.length ? nx : [0])), maxX = Math.max(...(nx.length ? nx : [1])), minY = Math.min(...(ny.length ? ny : [0])), maxY = Math.max(...(ny.length ? ny : [1])), spanX = maxX - minX || 1, spanY = maxY - minY || 1;
+        const nx = numeric(x), ny = numeric(y), minX = systemArrayMin(nx, 0), maxX = systemArrayMax(nx, 1), minY = systemArrayMin(ny, 0), maxY = systemArrayMax(ny, 1), spanX = maxX - minX || 1, spanY = maxY - minY || 1;
         const sx = (value) => left + ((Number(value) - minX) / spanX) * plotW, sy = (value) => top + plotH - ((Number(value) - minY) / spanY) * plotH;
         const points = x.map((value, index) => Number.isFinite(Number(value)) && Number.isFinite(Number(y[index])) ? `<circle cx="${sx(value)}" cy="${sy(y[index])}" r="2.7" fill="${green}" opacity=".75"/>` : "").join("");
         let fit = "";
@@ -20721,7 +21860,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       const numeric = (values) => (values || []).map(Number).filter(Number.isFinite);
       const scale = (values, includeZero = true) => {
         const nums = numeric(values);
-        let min = nums.length ? Math.min(...nums) : 0, max = nums.length ? Math.max(...nums) : 1;
+        let min = systemArrayMin(nums, 0), max = systemArrayMax(nums, 1);
         if (includeZero) { min = Math.min(0, min); max = Math.max(0, max); }
         if (min === max) { min -= 1; max += 1; }
         return { min, max, y: (value) => top + plotH - ((Number(value) - min) / (max - min)) * plotH };
@@ -20745,7 +21884,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
         return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${reportEscape(chart.title)}">${title}${grid}${axis}${bars}</svg>`;
       }
       if (type === "horizontal_bar") {
-        const nums = numeric(values), max = Math.max(1, ...nums), band = plotH / Math.max(1, labels.length);
+        const nums = numeric(values), max = Math.max(1, systemArrayMax(nums, 1)), band = plotH / Math.max(1, labels.length);
         const bars = labels.map((label,index)=>{ const value=Number(values[index])||0,w=(value/max)*plotW,y=top+index*band+band*.2; return `${reportSvgText(String(label).slice(0,14),left-8,y+band*.34,"end",8)}<rect x="${left}" y="${y}" width="${Math.max(1,w)}" height="${band*.55}" rx="3" fill="${colors[index%colors.length]}"/>${reportSvgText(executionFormatNumber(value),left+w+5,y+band*.36,"start",8)}`; }).join("");
         return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${reportEscape(chart.title)}">${title}${axis}${bars}</svg>`;
       }
@@ -20767,12 +21906,12 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
         return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${reportEscape(chart.title)}">${title}${arcs}</svg>`;
       }
       if (["scatter","bubble"].includes(type)) {
-        const x=numeric(chart.x||payload.x),y=numeric(chart.y||payload.y),sizes=numeric(chart.sizes||chart.size||payload.sizes||payload.size),minX=Math.min(...(x.length?x:[0])),maxX=Math.max(...(x.length?x:[1])),minY=Math.min(...(y.length?y:[0])),maxY=Math.max(...(y.length?y:[1])),sx=(v)=>left+((v-minX)/(maxX-minX||1))*plotW,sy=(v)=>top+plotH-((v-minY)/(maxY-minY||1))*plotH,maxSize=Math.max(1,...sizes);
+        const x=numeric(chart.x||payload.x),y=numeric(chart.y||payload.y),sizes=numeric(chart.sizes||chart.size||payload.sizes||payload.size),minX=systemArrayMin(x,0),maxX=systemArrayMax(x,1),minY=systemArrayMin(y,0),maxY=systemArrayMax(y,1),sx=(v)=>left+((v-minX)/(maxX-minX||1))*plotW,sy=(v)=>top+plotH-((v-minY)/(maxY-minY||1))*plotH,maxSize=Math.max(1,systemArrayMax(sizes,1));
         const points=x.map((v,i)=>Number.isFinite(y[i])?`<circle cx="${sx(v)}" cy="${sy(y[i])}" r="${type==="bubble"?Math.max(3,12*(sizes[i]||1)/maxSize):3}" fill="#2f9360" opacity=".68"/>`:"").join("");
         return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${reportEscape(chart.title)}">${title}${grid}${axis}${points}${reportSvgText(executionFormatNumber(minX),left,top+plotH+18,"middle",8)}${reportSvgText(executionFormatNumber(maxX),left+plotW,top+plotH+18,"middle",8)}</svg>`;
       }
       if (type === "heatmap") {
-        const matrix=Array.isArray(chart.matrix)?chart.matrix:(Array.isArray(payload.matrix)?payload.matrix:[]),xLabels=chart.xLabels||payload.xLabels||labels,yLabels=chart.yLabels||payload.yLabels||matrix.map((_,i)=>`行${i+1}`),flat=matrix.flat().map(Number).filter(Number.isFinite),min=Math.min(...(flat.length?flat:[0])),max=Math.max(...(flat.length?flat:[1])),cellW=plotW/Math.max(1,xLabels.length),cellH=plotH/Math.max(1,yLabels.length);
+        const matrix=Array.isArray(chart.matrix)?chart.matrix:(Array.isArray(payload.matrix)?payload.matrix:[]),xLabels=chart.xLabels||payload.xLabels||labels,yLabels=chart.yLabels||payload.yLabels||matrix.map((_,i)=>`行${i+1}`),flat=matrix.flat().map(Number).filter(Number.isFinite),min=systemArrayMin(flat,0),max=systemArrayMax(flat,1),cellW=plotW/Math.max(1,xLabels.length),cellH=plotH/Math.max(1,yLabels.length);
         const cells=matrix.map((row,r)=>row.map((value,c)=>{const ratio=(Number(value)-min)/(max-min||1),opacity=.16+.78*Math.max(0,Math.min(1,ratio));return `<rect x="${left+c*cellW}" y="${top+r*cellH}" width="${cellW}" height="${cellH}" fill="#24784e" opacity="${opacity}"/><text x="${left+c*cellW+cellW/2}" y="${top+r*cellH+cellH/2+3}" text-anchor="middle" font-size="8" fill="${opacity>.58?'#fff':'#17221b'}">${reportEscape(executionFormatNumber(value,2))}</text>`;}).join("")).join("");
         const xl=xLabels.map((label,i)=>reportSvgText(String(label).slice(0,9),left+i*cellW+cellW/2,top+plotH+18,"middle",8)).join("");const yl=yLabels.map((label,i)=>reportSvgText(String(label).slice(0,9),left-6,top+i*cellH+cellH/2+3,"end",8)).join("");
         return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${reportEscape(chart.title)}">${title}${cells}${xl}${yl}</svg>`;
@@ -20825,7 +21964,7 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
         return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${reportEscape(chart.title)}">${title}${grid}${axis}${ticks}${shapes}</svg>`;
       }
       if (type === "radar") {
-        const radarSeries=Array.isArray(chart.series)&&chart.series.length?chart.series:(Array.isArray(payload.series)&&payload.series.length?payload.series:[]);const series=radarSeries.length?radarSeries:[{label:chart.seriesName||"结果",values}],n=Math.max(3,labels.length),cx=width/2,cy=height/2+10,r=100,max=Math.max(1,...series.flatMap(s=>numeric(s.values)));
+        const radarSeries=Array.isArray(chart.series)&&chart.series.length?chart.series:(Array.isArray(payload.series)&&payload.series.length?payload.series:[]);const series=radarSeries.length?radarSeries:[{label:chart.seriesName||"结果",values}],n=Math.max(3,labels.length),cx=width/2,cy=height/2+10,r=100,max=Math.max(1,systemArrayMax(series.flatMap(s=>numeric(s.values)),1));
         const rings=[.25,.5,.75,1].map(level=>`<polygon points="${Array.from({length:n},(_,i)=>`${cx+r*level*Math.cos(-Math.PI/2+i*2*Math.PI/n)},${cy+r*level*Math.sin(-Math.PI/2+i*2*Math.PI/n)}`).join(' ')}" fill="none" stroke="#e3ebe6"/>`).join("");const axes=Array.from({length:n},(_,i)=>`<line x1="${cx}" y1="${cy}" x2="${cx+r*Math.cos(-Math.PI/2+i*2*Math.PI/n)}" y2="${cy+r*Math.sin(-Math.PI/2+i*2*Math.PI/n)}" stroke="#d4e2d8"/>${reportSvgText(String(labels[i]??i+1).slice(0,9),cx+(r+18)*Math.cos(-Math.PI/2+i*2*Math.PI/n),cy+(r+18)*Math.sin(-Math.PI/2+i*2*Math.PI/n),"middle",8)}`).join("");const polygons=series.map((s,j)=>`<polygon points="${Array.from({length:n},(_,i)=>{const v=Number(s.values?.[i])||0;return `${cx+r*(v/max)*Math.cos(-Math.PI/2+i*2*Math.PI/n)},${cy+r*(v/max)*Math.sin(-Math.PI/2+i*2*Math.PI/n)}`}).join(' ')}" fill="${colors[j%colors.length]}" fill-opacity=".18" stroke="${colors[j%colors.length]}" stroke-width="2"/>`).join("");
         return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${reportEscape(chart.title)}">${title}${rings}${axes}${polygons}</svg>`;
       }
@@ -20837,9 +21976,13 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
 
     function reportTableHtml(table) {
       const format = table.format === "three_line" ? "three-line" : "standard";
+      const rows = Array.isArray(table.rows) ? table.rows : [];
+      const limit = SYSTEM_LARGE_DATA_CONFIG.reportTablePreviewRows;
+      const previewRows = rows.slice(0, limit);
       const head = `<thead><tr>${(table.columns || []).map((column) => `<th>${reportEscape(column)}</th>`).join("")}</tr></thead>`;
-      const body = `<tbody>${(table.rows || []).map((row) => `<tr>${(row || []).map((value) => `<td>${reportEscape(value ?? "")}</td>`).join("")}</tr>`).join("")}</tbody>`;
-      return `<div class="report-table-canvas"><table class="report-data-table ${format}">${head}${body}</table></div>`;
+      const body = `<tbody>${previewRows.map((row) => `<tr>${(row || []).map((value) => `<td>${reportEscape(value ?? "")}</td>`).join("")}</tr>`).join("")}</tbody>`;
+      const note = rows.length > limit ? `<div class="large-data-window-note">预览前 ${limit.toLocaleString()} 行，共 ${rows.length.toLocaleString()} 行；完整结果仍保留在当前项目—方案中。</div>` : "";
+      return `<div class="report-table-canvas"><table class="report-data-table ${format}">${head}${body}</table></div>${note}`;
     }
 
     function reportRenderCharts() {
@@ -20981,7 +22124,16 @@ self.onmessage = async function(event) {
       : (self.GeneratedStatisticalAnalysis && typeof self.GeneratedStatisticalAnalysis.execute === "function" ? self.GeneratedStatisticalAnalysis.execute : null);
     if (!runner) throw new Error("AI代码缺少 executeGeneratedAnalysis 公开入口");
     var output = await runner(packet.runtimeInput || { rows: [] }, null);
-    var plain = JSON.parse(JSON.stringify(output, function(key, value) {
+    var safeOutput = output && typeof output === "object" ? Object.assign({}, output) : output;
+    if (safeOutput && safeOutput.result && typeof safeOutput.result === "object") {
+      safeOutput.result = Object.assign({}, safeOutput.result);
+      if (Array.isArray(safeOutput.result.effectiveRows)) {
+        safeOutput.result.effectiveRowCount = safeOutput.result.effectiveRows.length;
+        safeOutput.result.effectiveRowsSample = safeOutput.result.effectiveRows.slice(0, 24);
+        delete safeOutput.result.effectiveRows;
+      }
+    }
+    var plain = JSON.parse(JSON.stringify(safeOutput, function(key, value) {
       return typeof value === "number" && !Number.isFinite(value) ? null : value;
     }));
     self.postMessage({ type: "analysis-code-result", token: packet.token, ok: true, output: plain });
@@ -21093,11 +22245,11 @@ self.onmessage = async function(event) {
           source: "report_generated_code",
           method: output.method || executionNormalizeMethodCode(plan.primaryMethod),
           usedRows: Number(output.usedRows) || rows.length,
-          result: reportClone(output.result),
+          result: reportClone(systemResultForStorage(output.result)),
           tableFormat: plan.tableFormat || "none",
           requestedCharts: expectedChartCodes,
           tables: normalizedTables,
-          charts: normalizedCharts
+          charts: normalizedCharts.map((chart) => systemCompactChartForAI(chart, SYSTEM_LARGE_DATA_CONFIG.chartStoragePoints))
         };
         const current = reportEnsureCurrentReport();
         current.execution = snapshot;
@@ -21129,7 +22281,7 @@ self.onmessage = async function(event) {
     }
 
     function reportSkillPrompt() {
-      return `你是嵌入数据分析系统的“图文报告 Skill v0.9.0”。你只处理 payload.project_id 与 payload.plan_id 共同确定的当前项目—方案。依据当前方案、数据来源、AI代码执行结果、描述统计表、分析结果表和全部图表配置及数据，生成可直接填入报告预览的中文内容。只输出严格 JSON，不得输出 Markdown、代码围栏或额外正文。
+      return `你是嵌入数据分析系统的“图文报告 Skill v0.9.1”。你只处理 payload.project_id 与 payload.plan_id 共同确定的当前项目—方案。依据当前方案、数据来源、AI代码执行结果、描述统计表、分析结果表，以及图表统计摘要和代表性数据，生成可直接填入报告预览的中文内容。只输出严格 JSON，不得输出 Markdown、代码围栏或额外正文。
 
 项目与方案隔离：
 1. payload.artifact_key 是本次报告唯一身份。不得引用其他项目、其他方案、历史报告或未包含在 payload 中的信息。
@@ -21292,6 +22444,19 @@ self.onmessage = async function(event) {
 
     window.reportSkillPrompt = reportSkillPrompt;
 
+    function reportCompactExecutionForAI(execution, expectedTables, expectedCharts) {
+      return {
+        run_id: execution?.runId || "",
+        run_at: execution?.runAt || "",
+        used_rows: Number(execution?.usedRows) || Number(execution?.result?.effectiveRowCount) || 0,
+        data_signature: execution?.dataSignature || "",
+        result: systemCompactExecutionResult(execution?.result || {}, { storage: false }),
+        tables: (expectedTables || []).map((table) => systemCompactTableForAI(table, 80)),
+        charts: (expectedCharts || []).map((chart) => systemCompactChartForAI(chart, SYSTEM_LARGE_DATA_CONFIG.chartAIPoints)),
+        context_mode: "statistics_profiles_representative_rows_downsampled_charts_no_full_dataset"
+      };
+    }
+
     async function reportAIFillCurrent() {
       if (reportState.aiRunning) return false;
       const current = reportState.currentReport, plan = reportPlan();
@@ -21308,14 +22473,15 @@ self.onmessage = async function(event) {
         return false;
       }
       reportState.aiRunning = true;
-      reportSetStage("ai", "running", "图文报告 Skill 正在逐项分析全部图表和结果表");
-      reportSetLoading(true, "正在生成图文报告", "AI仅接收当前项目—方案的全部图表、结果表和执行结果，不读取其他项目或方案。");
+      reportSetStage("ai", "running", "图文报告 Skill 正在分析结果画像、代表性表格行和降采样图表");
+      reportSetLoading(true, "正在生成图文报告", "AI仅接收当前项目—方案的统计结果摘要、代表性表格行和降采样图表，不上传完整底表。");
       reportUpdateGate();
       try {
         const execution = current.execution;
         const expectedCharts = reportNormalizeCharts(execution, plan);
         const expectedTables = reportNormalizeTables(execution.tables || execution.result?.tables || [], plan);
         if (expectedCharts.some((chart) => chart.missing)) throw new Error("当前执行结果仍缺少部分方案图表，请先重新生成并运行分析代码");
+        const compactExecution = reportCompactExecutionForAI(execution, expectedTables, expectedCharts);
         const basePayload = {
           project_id: reportState.projectId,
           plan_id: plan.id,
@@ -21325,14 +22491,15 @@ self.onmessage = async function(event) {
           data_source: reportDataSourceLabel(plan),
           method: { code: execution.method || executionNormalizeMethodCode(plan.primaryMethod), label: reportMethodLabel(plan) },
           execution: {
-            run_id: execution.runId,
-            run_at: execution.runAt,
-            used_rows: execution.usedRows,
-            result: reportClone(execution.result),
-            data_signature: execution.dataSignature
+            run_id: compactExecution.run_id,
+            run_at: compactExecution.run_at,
+            used_rows: compactExecution.used_rows,
+            result: compactExecution.result,
+            data_signature: compactExecution.data_signature,
+            context_mode: compactExecution.context_mode
           },
-          tables: reportClone(expectedTables),
-          charts: reportClone(expectedCharts),
+          tables: compactExecution.tables,
+          charts: compactExecution.charts,
           output_order: ["descriptive", "analysis_result", "charts"],
           writing_contract: {
             core: "图文展示",
@@ -21347,13 +22514,16 @@ self.onmessage = async function(event) {
             conclusion: current.content.conclusion || ""
           }
         };
+        const aiContextBytes = systemJsonSize(basePayload);
+        reportSetStage("ai", "running", `AI上下文 ${systemFormatBytes(aiContextBytes)}；完整底表不上传，结果表与图表按画像和代表性样本传输`);
+        reportSetMessage(reportElements.executionMessage, `正在生成报告文字：分析记录 ${compactExecution.used_rows.toLocaleString("zh-CN")} 条；AI上下文 ${systemFormatBytes(aiContextBytes)}。`, aiContextBytes > SYSTEM_LARGE_DATA_CONFIG.aiSoftChars ? "warning" : "");
         let result = null;
         let attemptPayload = basePayload;
         for (let attempt = 1; attempt <= 2; attempt++) {
           const content = await callConfiguredAI([
             { role: "system", content: reportSkillPrompt() },
             { role: "user", content: JSON.stringify(attemptPayload) }
-          ], { json: true, thinking: "disabled", maxTokens: 16000 });
+          ], { json: true, thinking: "disabled", maxTokens: 16000, contextLabel: "图文报告" });
           result = reportNormalizeAIResult(analysisExtractJson(content), expectedCharts, expectedTables, reportArtifactKey());
           const issues = reportValidateAIContent(result, expectedCharts, expectedTables, reportArtifactKey());
           if (result.status === "error") issues.push(...(Array.isArray(result.warnings) ? result.warnings.map(String) : ["图文报告 Skill 返回error"]));
