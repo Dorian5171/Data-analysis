@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>数据分析系统 · v0.10.1</title>
+  <title>数据分析系统 · v0.10.2</title>
   <style>
     :root {
       --bg: #f5f8f6;
@@ -7230,7 +7230,7 @@
     }
 
 
-    /* v0.10.1：兼容压缩与多格式项目导出 */
+    /* v0.10.2：兼容压缩与多格式项目导出 */
     .project-export-modal {
       width: min(820px, 100%);
     }
@@ -7492,7 +7492,7 @@
         <div class="brand-mark" aria-hidden="true"></div>
         <div class="brand-copy">
           <p class="brand-title">数据分析系统</p>
-          <div class="brand-version">Version 0.10.1</div>
+          <div class="brand-version">Version 0.10.2</div>
         </div>
       </div>
 
@@ -9519,7 +9519,7 @@
         button.classList.add("active");
         document.getElementById(`page-${target}`).classList.add("active");
         breadcrumbName.textContent = pageNames[target];
-        document.title = `${pageNames[target]} · 数据分析系统 v0.9.3`;
+        document.title = `${pageNames[target]} · 数据分析系统 v0.10.2`;
 
         if (target === "dashboard") {
           await window.dashboardRefreshProjectOptions?.();
@@ -9776,16 +9776,17 @@
         });
         emit({ projectId, section: "project", action: "delete", updatedAt: new Date().toISOString() });
       });
-      const listInfos = async () => {
+      const listRecords = async () => {
         const db = await open();
         return new Promise((resolve, reject) => {
           const tx = db.transaction(PROJECT_REPOSITORY_STORE, "readonly");
           const req = tx.objectStore(PROJECT_REPOSITORY_STORE).getAll();
-          req.onsuccess = () => resolve((req.result || []).map((record) => clone(record.info)).filter(Boolean));
-          req.onerror = () => reject(req.error || new Error("读取项目索引失败"));
+          req.onsuccess = () => resolve((req.result || []).map((record) => clone(record)));
+          req.onerror = () => reject(req.error || new Error("读取项目仓库失败"));
         });
       };
-      return { open, get, getSection, setSection, patchSection, setInfo, deleteProject: remove, listInfos };
+      const listInfos = async () => (await listRecords()).map((record) => clone(record.info)).filter(Boolean);
+      return { open, get, getSection, setSection, patchSection, setInfo, deleteProject: remove, listInfos, listRecords };
     })();
     const projectState = {
       projects: [],
@@ -10502,6 +10503,7 @@
       };
       projectState.projects.push(project);
       saveProjects();
+      window.projectRepository?.setInfo(project.id, project, "project_create").catch(() => {});
       projectElements.quickForm.reset();
       projectElements.quickType.value = "常规分析";
       setProjectView("active");
@@ -10944,7 +10946,7 @@
         lifecycle: projectDeriveLifecycle(record, project),
         repository: { id: record?.id, revisions: record?.revisions, createdAt: record?.createdAt, updatedAt: record?.updatedAt },
         exportedAt: new Date().toISOString(),
-        systemVersion: "0.10.1"
+        systemVersion: "0.10.2"
       };
     }
 
@@ -11702,7 +11704,7 @@
           const dateCode = `${exportedAt.getFullYear()}${String(exportedAt.getMonth() + 1).padStart(2, "0")}${String(exportedAt.getDate()).padStart(2, "0")}_${String(exportedAt.getHours()).padStart(2, "0")}${String(exportedAt.getMinutes()).padStart(2, "0")}`;
           const root = `${projectExportProjectStem(project)}_项目导出_${dateCode}`;
           const manifest = {
-            systemVersion: "0.10.1",
+            systemVersion: "0.10.2",
             project: { id: project.id, name: project.name },
             exportedAt: exportedAt.toISOString(),
             selectedModules,
@@ -11748,18 +11750,23 @@
       projectExportOpen(project);
     });
 
-    document.querySelector(".project-module-entry")?.addEventListener("click", (event) => {
+    document.querySelector(".project-module-entry")?.addEventListener("click", async (event) => {
       const button = event.target.closest("[data-project-target]");
       if (!button) return;
       const project = projectState.projects.find((item) => item.id === projectState.detailsProjectId);
       if (!project) return;
       localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, project.id);
       const target = button.dataset.projectTarget;
-      document.querySelector(`.nav-button[data-page="${target}"]`)?.click();
-      if (target === "dashboard") window.dashboardSelectProject?.(project.id);
-      if (target === "analysis") window.analysisSelectProject?.(project.id);
-      if (target === "execution") window.executionSelectProject?.(project.id);
-      if (target === "report") window.reportSelectProject?.(project.id);
+      button.disabled = true;
+      try {
+        if (target === "dashboard") await window.dashboardSelectProject?.(project.id);
+        if (target === "analysis") await window.analysisSelectProject?.(project.id);
+        if (target === "execution") await window.executionSelectProject?.(project.id);
+        if (target === "report") await window.reportSelectProject?.(project.id);
+        document.querySelector(`.nav-button[data-page="${target}"]`)?.click();
+      } finally {
+        button.disabled = false;
+      }
     });
 
     projectElements.detailCloseButton.addEventListener("click", () => {
@@ -11832,6 +11839,49 @@
       window.__projectLifecycleRefreshTimer = setTimeout(() => projectRefreshLifecycleFromRepository(detail.projectId).catch(() => {}), 90);
     });
 
+    window.dataAnalysisScope = {
+      projectRecord: (projectId) => window.projectRepository.get(projectId),
+      validateProject: async (projectId) => {
+        const record = await window.projectRepository.get(projectId);
+        if (!record) return { ok: true, projectId, issues: [], empty: true };
+        const issues = [];
+        const allRecords = await window.projectRepository.listRecords().catch(() => []);
+        const foreignFiles = new Set();
+        const foreignPreprocess = new Set();
+        allRecords.filter((item) => item?.id && item.id !== projectId).forEach((item) => {
+          (item.dashboard?.files || []).forEach((file) => { if (file?.id) foreignFiles.add(String(file.id)); });
+          (item.dashboard?.preprocessing?.tables || []).forEach((table) => { if (table?.id) foreignPreprocess.add(String(table.id)); });
+        });
+        (record.dashboard?.files || []).forEach((file) => {
+          if (file?.ownerProjectId && file.ownerProjectId !== projectId) issues.push(`数据表 ${file.id || file.name} 归属 ${file.ownerProjectId}`);
+          else if (!file?.ownerProjectId && foreignFiles.has(String(file?.id || ""))) issues.push(`数据表 ${file.id || file.name} 与其他项目重复`);
+        });
+        (record.dashboard?.preprocessing?.tables || []).forEach((table) => {
+          if (table?.ownerProjectId && table.ownerProjectId !== projectId) issues.push(`预处理表 ${table.id || table.name} 归属 ${table.ownerProjectId}`);
+          else if (!table?.ownerProjectId && foreignPreprocess.has(String(table?.id || ""))) issues.push(`预处理表 ${table.id || table.name} 与其他项目重复`);
+        });
+        ["dashboard", "analysis", "execution", "report"].forEach((section) => {
+          const payload = record[section];
+          if (payload?.projectId && payload.projectId !== projectId) issues.push(`${section} 归属 ${payload.projectId}`);
+        });
+        const planIds = new Set((record.analysis?.plans || []).filter((plan) => !plan?.projectId || plan.projectId === projectId).map((plan) => String(plan.id)));
+        Object.entries(record.execution?.planArtifacts || {}).forEach(([key, item]) => {
+          if (item?.projectId && item.projectId !== projectId) issues.push(`代码 ${key} 归属 ${item.projectId}`);
+          if (item?.planId && !planIds.has(String(item.planId))) issues.push(`代码 ${key} 引用了其他或已删除方案`);
+        });
+        Object.entries(record.execution?.planRuns || {}).forEach(([key, item]) => {
+          if (item?.projectId && item.projectId !== projectId) issues.push(`结果 ${key} 归属 ${item.projectId}`);
+          if (item?.planId && !planIds.has(String(item.planId))) issues.push(`结果 ${key} 引用了其他或已删除方案`);
+        });
+        Object.entries(record.report?.planReports || {}).forEach(([planId, item]) => {
+          if (!planIds.has(String(planId))) issues.push(`报告 ${planId} 引用了其他或已删除方案`);
+          if (item?.projectId && item.projectId !== projectId) issues.push(`报告 ${planId} 归属 ${item.projectId}`);
+          if (item?.planId && String(item.planId) !== String(planId)) issues.push(`报告键 ${planId} 与内部方案ID不一致`);
+        });
+        return { ok: !issues.length, projectId, issues };
+      }
+    };
+
     window.addEventListener("dataAnalysisAgent:projects-index-updated", () => {
       window.dashboardRefreshProjectOptions?.();
       window.analysisRefreshProjectOptions?.();
@@ -11885,6 +11935,8 @@
       lastRenderedSheetKey: "",
       lastRenderedPreprocessTableId: "",
       saveTimer: null,
+      contextToken: 0,
+      loadedProjectId: null,
       db: null
     };
 
@@ -12454,6 +12506,9 @@
     }
 
     function dashboardResetWorkspace() {
+      clearTimeout(dashboardState.saveTimer);
+      dashboardState.saveTimer = null;
+      dashboardState.loadedProjectId = null;
       dashboardState.files = [];
       dashboardState.stagedFiles = [];
       dashboardState.activeFileId = null;
@@ -12477,6 +12532,12 @@
       dashboardState.preprocessFilter = null;
       dashboardState.preprocessUndoStack = [];
       dashboardState.preprocessRedoStack = [];
+      dashboardState.tableVirtualStart = 0;
+      dashboardState.preprocessVirtualStart = 0;
+      dashboardState.visibleRowCache = null;
+      dashboardState.preprocessVisibleRowCache = null;
+      dashboardState.lastRenderedSheetKey = "";
+      dashboardState.lastRenderedPreprocessTableId = "";
     }
 
     function dashboardUpdateProjectGate() {
@@ -12553,40 +12614,58 @@
       });
     }
 
-    async function dashboardPersistNow() {
+    async function dashboardPersistNow(expectedProjectId = dashboardState.projectId) {
       clearTimeout(dashboardState.saveTimer);
-      if (!dashboardState.projectId) {
-        dashboardSetSaveState("未关联项目", "error");
-        dashboardSetImportAlert("请选择关联项目后再保存数据", "warning");
+      dashboardState.saveTimer = null;
+      const projectId = expectedProjectId || dashboardState.projectId;
+      if (!projectId || dashboardState.projectId !== projectId) {
+        if (!projectId) {
+          dashboardSetSaveState("未关联项目", "error");
+          dashboardSetImportAlert("请选择关联项目后再保存数据", "warning");
+        }
         return;
       }
       dashboardSetSaveState("保存中", "saving");
-      try {
-        const payload = {
-          projectId: dashboardState.projectId,
-          files: dashboardState.files,
+      const scopedFiles = dashboardClone(dashboardState.files).map((file) => ({
+        ...file,
+        projectId,
+        ownerProjectId: projectId,
+        sheets: (file.sheets || []).map((sheet) => ({ ...sheet, projectId, ownerProjectId: projectId })),
+        originalSheets: (file.originalSheets || []).map((sheet) => ({ ...sheet, projectId, ownerProjectId: projectId }))
+      }));
+      const scopedPreprocessing = dashboardClone(dashboardState.preprocessing);
+      scopedPreprocessing.projectId = projectId;
+      scopedPreprocessing.tables = (scopedPreprocessing.tables || []).map((table) => ({ ...table, projectId, ownerProjectId: projectId }));
+      const payload = {
+        projectId,
+        files: scopedFiles,
+        activeFileId: dashboardState.activeFileId,
+        activeSheetId: dashboardState.activeSheetId,
+        selectedCell: dashboardClone(dashboardState.selectedCell),
+        activityLog: dashboardClone(dashboardState.activityLog),
+        processingTouched: dashboardState.processingTouched,
+        importMode: dashboardState.importMode,
+        preprocessing: scopedPreprocessing,
+        viewState: {
           activeFileId: dashboardState.activeFileId,
           activeSheetId: dashboardState.activeSheetId,
-          selectedCell: dashboardState.selectedCell,
-          activityLog: dashboardState.activityLog,
-          processingTouched: dashboardState.processingTouched,
+          selectedCell: dashboardClone(dashboardState.selectedCell),
           importMode: dashboardState.importMode,
-          preprocessing: dashboardClone(dashboardState.preprocessing),
-          viewState: {
-            activeFileId: dashboardState.activeFileId,
-            activeSheetId: dashboardState.activeSheetId,
-            selectedCell: dashboardState.selectedCell,
-            importMode: dashboardState.importMode,
-            lastViewedAt: new Date().toISOString()
-          },
-          savedAt: new Date().toISOString()
-        };
-        await window.projectRepository.setSection(dashboardState.projectId, "dashboard", payload, "dashboard_save");
-        dashboardSetSaveState("已保存");
-        dashboardSyncProjectMetadata();
+          lastViewedAt: new Date().toISOString()
+        },
+        savedAt: new Date().toISOString()
+      };
+      try {
+        await window.projectRepository.setSection(projectId, "dashboard", payload, "dashboard_save");
+        if (dashboardState.projectId === projectId) {
+          dashboardSetSaveState("已保存");
+          dashboardSyncProjectMetadata();
+        }
       } catch (error) {
-        dashboardSetSaveState("保存失败", "error");
-        dashboardSetImportAlert(`项目数据保存失败：${error.message}`, "error");
+        if (dashboardState.projectId === projectId) {
+          dashboardSetSaveState("保存失败", "error");
+          dashboardSetImportAlert(`项目数据保存失败：${error.message}`, "error");
+        }
       }
     }
 
@@ -12597,46 +12676,103 @@
 
     function dashboardScheduleSave() {
       if (!dashboardState.projectId) return;
+      const projectId = dashboardState.projectId;
+      const contextToken = dashboardState.contextToken;
       dashboardSetSaveState("待保存", "saving");
       clearTimeout(dashboardState.saveTimer);
-      dashboardState.saveTimer = setTimeout(dashboardPersistNow, 550);
+      dashboardState.saveTimer = setTimeout(() => {
+        if (dashboardState.projectId !== projectId || dashboardState.contextToken !== contextToken) return;
+        dashboardPersistNow(projectId);
+      }, 550);
     }
 
-    async function dashboardRestoreState(projectId = dashboardState.projectId) {
-      if (!projectId) return;
+    async function dashboardForeignOwnership(projectId) {
+      const fileIds = new Set();
+      const sheetIds = new Set();
+      const preprocessTableIds = new Set();
+      try {
+        const records = await window.projectRepository.listRecords();
+        records.filter((record) => record?.id && record.id !== projectId).forEach((record) => {
+          (record.dashboard?.files || []).forEach((file) => {
+            if (file?.id) fileIds.add(String(file.id));
+            (file?.sheets || []).forEach((sheet) => { if (sheet?.id) sheetIds.add(String(sheet.id)); });
+          });
+          (record.dashboard?.preprocessing?.tables || []).forEach((table) => { if (table?.id) preprocessTableIds.add(String(table.id)); });
+        });
+      } catch (error) {}
+      return { fileIds, sheetIds, preprocessTableIds };
+    }
+
+    async function dashboardRestoreState(projectId = dashboardState.projectId, contextToken = dashboardState.contextToken) {
+      if (!projectId) return false;
+      const isCurrent = () => dashboardState.projectId === projectId && dashboardState.contextToken === contextToken;
       try {
         let saved = await window.projectRepository.getSection(projectId, "dashboard");
+        if (!isCurrent()) return false;
         if (!saved) {
           try {
             dashboardState.db = dashboardState.db || await dashboardOpenDb();
+            if (!isCurrent()) return false;
             saved = await new Promise((resolve, reject) => {
               const tx = dashboardState.db.transaction(DASHBOARD_STORE_NAME, "readonly");
-              const request = tx.objectStore(DASHBOARD_STORE_NAME).get(dashboardWorkspaceKey(projectId));
+              const request = tx.objectStore(DASHBOARD_STORE_NAME).get(`${DASHBOARD_PROJECT_KEY_PREFIX}${projectId}`);
               request.onsuccess = () => resolve(request.result || null);
               request.onerror = () => reject(request.error);
             });
-            if (saved) await window.projectRepository.setSection(projectId, "dashboard", saved, "legacy_migration");
+            if (!isCurrent()) return false;
+            if (saved && (!saved.projectId || saved.projectId === projectId)) {
+              saved = { ...saved, projectId };
+              await window.projectRepository.setSection(projectId, "dashboard", saved, "legacy_migration");
+            }
           } catch (legacyError) {}
         }
+        if (!isCurrent()) return false;
+        if (saved?.projectId && saved.projectId !== projectId) {
+          dashboardSetImportAlert(`检测到数据作用域异常：仓库内容属于 ${saved.projectId}，已阻止加载到当前项目。`, "error");
+          dashboardState.loadedProjectId = projectId;
+          return false;
+        }
+        const foreignOwnership = await dashboardForeignOwnership(projectId);
+        if (!isCurrent()) return false;
+        const storedFileCount = Array.isArray(saved?.files) ? saved.files.length : 0;
+        const storedPreprocessCount = Array.isArray(saved?.preprocessing?.tables) ? saved.preprocessing.tables.length : 0;
         if (saved?.files?.length) {
-          dashboardState.files = saved.files.map((file) => ({
-            ...file,
-            originalSheets: file.originalSheets?.length ? file.originalSheets : dashboardClone(file.sheets)
-          }));
-          dashboardState.activeFileId = saved.activeFileId || saved.viewState?.activeFileId || saved.files[0].id;
-          const file = dashboardState.files.find((item) => item.id === dashboardState.activeFileId) || dashboardState.files[0];
-          dashboardState.activeFileId = file.id;
-          dashboardState.activeSheetId = file.sheets.some((sheet) => sheet.id === (saved.activeSheetId || saved.viewState?.activeSheetId))
-            ? (saved.activeSheetId || saved.viewState?.activeSheetId)
-            : file.sheets[0]?.id || null;
+          dashboardState.files = saved.files
+            .filter((file) => file?.ownerProjectId ? file.ownerProjectId === projectId : !foreignOwnership.fileIds.has(String(file?.id || "")))
+            .map((file) => ({
+              ...file,
+              projectId,
+              ownerProjectId: projectId,
+              sheets: (file.sheets || []).filter((sheet) => sheet?.ownerProjectId ? sheet.ownerProjectId === projectId : !foreignOwnership.sheetIds.has(String(sheet?.id || ""))).map((sheet) => ({ ...sheet, projectId, ownerProjectId: projectId })),
+              originalSheets: (file.originalSheets?.length ? file.originalSheets : dashboardClone(file.sheets || []))
+                .filter((sheet) => sheet?.ownerProjectId ? sheet.ownerProjectId === projectId : !foreignOwnership.sheetIds.has(String(sheet?.id || "")))
+                .map((sheet) => ({ ...sheet, projectId, ownerProjectId: projectId }))
+            }));
+          const firstFile = dashboardState.files[0] || null;
+          dashboardState.activeFileId = firstFile ? (saved.activeFileId || saved.viewState?.activeFileId || firstFile.id) : null;
+          const file = dashboardState.files.find((item) => item.id === dashboardState.activeFileId) || firstFile;
+          dashboardState.activeFileId = file?.id || null;
+          dashboardState.activeSheetId = file
+            ? (file.sheets.some((sheet) => sheet.id === (saved.activeSheetId || saved.viewState?.activeSheetId))
+              ? (saved.activeSheetId || saved.viewState?.activeSheetId)
+              : file.sheets[0]?.id || null)
+            : null;
           dashboardState.selectedCell = saved.selectedCell || saved.viewState?.selectedCell || null;
           dashboardState.activityLog = Array.isArray(saved.activityLog) ? saved.activityLog : [];
           dashboardState.processingTouched = Boolean(saved.processingTouched);
           dashboardState.importMode = saved.importMode || saved.viewState?.importMode || dashboardState.importMode || "append";
           dashboardState.preprocessing = dashboardPreprocessNormalizeWorkspace(saved.preprocessing);
+          dashboardState.preprocessing.projectId = projectId;
+          dashboardState.preprocessing.tables = (dashboardState.preprocessing.tables || [])
+            .filter((table) => table?.ownerProjectId ? table.ownerProjectId === projectId : !foreignOwnership.preprocessTableIds.has(String(table?.id || "")))
+            .map((table) => ({ ...table, projectId, ownerProjectId: projectId }));
           dashboardSetImportAlert(`已恢复项目“${dashboardProjectName(projectId)}”中的 ${dashboardState.files.length} 个文件和 ${dashboardState.preprocessing.tables.length} 张预处理表`);
         } else if (saved?.preprocessing?.tables?.length) {
           dashboardState.preprocessing = dashboardPreprocessNormalizeWorkspace(saved.preprocessing);
+          dashboardState.preprocessing.projectId = projectId;
+          dashboardState.preprocessing.tables = (dashboardState.preprocessing.tables || [])
+            .filter((table) => table?.ownerProjectId ? table.ownerProjectId === projectId : !foreignOwnership.preprocessTableIds.has(String(table?.id || "")))
+            .map((table) => ({ ...table, projectId, ownerProjectId: projectId }));
           dashboardState.activityLog = Array.isArray(saved.activityLog) ? saved.activityLog : [];
           dashboardState.processingTouched = Boolean(saved.processingTouched);
           dashboardState.importMode = saved.importMode || saved.viewState?.importMode || dashboardState.importMode || "append";
@@ -12644,24 +12780,52 @@
         } else {
           dashboardSetImportAlert(`项目“${dashboardProjectName(projectId)}”尚未保存数据，可开始导入`);
         }
+        const scopeCleanupNeeded = storedFileCount !== dashboardState.files.length
+          || storedPreprocessCount !== (dashboardState.preprocessing?.tables?.length || 0);
+        if (scopeCleanupNeeded && isCurrent()) {
+          const cleanedPayload = {
+            ...dashboardClone(saved || {}),
+            projectId,
+            files: dashboardClone(dashboardState.files),
+            activeFileId: dashboardState.activeFileId,
+            activeSheetId: dashboardState.activeSheetId,
+            preprocessing: dashboardClone(dashboardState.preprocessing),
+            savedAt: new Date().toISOString()
+          };
+          await window.projectRepository.setSection(projectId, "dashboard", cleanedPayload, "scope_cleanup").catch(() => {});
+          if (isCurrent()) dashboardSetImportAlert(`已隔离并清理不属于项目“${dashboardProjectName(projectId)}”的数据，当前项目数据已重新载入。`, "warning");
+        }
+        dashboardState.loadedProjectId = projectId;
+        return true;
       } catch (error) {
-        dashboardSetImportAlert(`无法恢复项目数据：${error.message}`, "warning");
+        if (isCurrent()) {
+          dashboardState.loadedProjectId = projectId;
+          dashboardSetImportAlert(`无法恢复项目数据：${error.message}`, "warning");
+        }
+        return false;
       }
     }
 
-    async function dashboardSwitchProject(projectId) {
-      if (projectId === dashboardState.projectId) {
+    async function dashboardSwitchProject(projectId, options = {}) {
+      const targetProjectId = projectId || null;
+      const requestToken = ++dashboardState.contextToken;
+      const previousProjectId = dashboardState.projectId;
+      if (!options.force && targetProjectId === previousProjectId && dashboardState.loadedProjectId === targetProjectId) {
         dashboardUpdateProjectGate();
         return;
       }
-      if (dashboardState.projectId && (dashboardState.files.length || dashboardState.activityLog.length)) await dashboardPersistNow();
+      if (previousProjectId && previousProjectId !== targetProjectId && dashboardState.saveTimer) {
+        await dashboardPersistNow(previousProjectId);
+        if (dashboardState.contextToken !== requestToken) return;
+      }
       dashboardResetWorkspace();
-      dashboardState.projectId = projectId || null;
+      dashboardState.projectId = targetProjectId;
       if (dashboardState.projectId) localStorage.setItem("dataAnalysisAgent.activeProjectId", dashboardState.projectId);
       else localStorage.removeItem("dataAnalysisAgent.activeProjectId");
       dashboardElements.projectSelect.value = dashboardState.projectId || "";
       dashboardUpdateProjectGate();
-      if (dashboardState.projectId) await dashboardRestoreState(dashboardState.projectId);
+      if (dashboardState.projectId) await dashboardRestoreState(dashboardState.projectId, requestToken);
+      if (dashboardState.contextToken !== requestToken || dashboardState.projectId !== targetProjectId) return;
       dashboardRenderStagedFiles();
       dashboardRenderAll();
       dashboardSyncProjectMetadata();
@@ -12669,17 +12833,17 @@
 
     window.dashboardSelectProject = async function dashboardSelectProject(projectId) {
       await dashboardRefreshProjectOptions(projectId);
-      if (dashboardElements.projectSelect.value === projectId) await dashboardSwitchProject(projectId);
+      dashboardElements.projectSelect.value = projectId || "";
+      await dashboardSwitchProject(projectId || "", { force: dashboardState.loadedProjectId !== (projectId || null) });
     };
 
     window.dashboardRefreshContext = async function dashboardRefreshContext(showMessage = true) {
-      const projectId = dashboardState.projectId || dashboardElements.projectSelect.value || "";
+      const projectId = dashboardElements.projectSelect.value || dashboardState.projectId || "";
       if (!projectId) return;
-      const activeFileId = dashboardState.activeFileId;
-      const activeSheetId = dashboardState.activeSheetId;
-      dashboardResetWorkspace();
-      dashboardState.projectId = projectId;
-      await dashboardRestoreState(projectId);
+      const activeFileId = dashboardState.projectId === projectId ? dashboardState.activeFileId : null;
+      const activeSheetId = dashboardState.projectId === projectId ? dashboardState.activeSheetId : null;
+      await dashboardSwitchProject(projectId, { force: true });
+      if (dashboardState.projectId !== projectId) return;
       if (activeFileId && dashboardState.files.some((file) => file.id === activeFileId)) dashboardState.activeFileId = activeFileId;
       const file = dashboardState.files.find((item) => item.id === dashboardState.activeFileId);
       if (file && activeSheetId && file.sheets.some((sheet) => sheet.id === activeSheetId)) dashboardState.activeSheetId = activeSheetId;
@@ -16985,6 +17149,8 @@
       activityLog: [],
       pendingAIResult: null,
       saveTimer: null,
+      contextToken: 0,
+      loadedProjectId: null,
       db: null
     };
 
@@ -17128,7 +17294,8 @@
     async function analysisReadWorkspace(projectId) {
       if (!projectId) return null;
       let saved = await window.projectRepository.getSection(projectId, "analysis");
-      if (saved) return saved;
+      if (saved?.projectId && saved.projectId !== projectId) return null;
+      if (saved) return { ...saved, projectId };
       try {
         analysisState.db = analysisState.db || await analysisOpenDb();
         saved = await new Promise((resolve, reject) => {
@@ -17137,39 +17304,43 @@
           request.onsuccess = () => resolve(request.result || null);
           request.onerror = () => reject(request.error);
         });
-        if (saved) await window.projectRepository.setSection(projectId, "analysis", saved, "legacy_migration");
+        if (saved && (!saved.projectId || saved.projectId === projectId)) {
+          saved = { ...saved, projectId };
+          await window.projectRepository.setSection(projectId, "analysis", saved, "legacy_migration");
+        }
       } catch (error) {}
       return saved || null;
     }
 
-    async function analysisWriteWorkspace() {
+    async function analysisWriteWorkspace(expectedProjectId = analysisState.projectId) {
       clearTimeout(analysisState.saveTimer);
       analysisState.saveTimer = null;
-      if (!analysisState.projectId) return;
+      const projectId = expectedProjectId || analysisState.projectId;
+      if (!projectId || analysisState.projectId !== projectId) return;
       analysisSetSaveState("保存中", "saving");
       try {
         const payload = {
-          projectId: analysisState.projectId,
+          projectId,
           requirement: analysisState.requirement,
-          plans: analysisState.plans,
+          plans: analysisClone(analysisState.plans.map((plan) => ({ ...plan, projectId }))),
           activePlanId: analysisState.activePlanId,
-          activityLog: analysisState.activityLog.slice(-160),
-          pendingAIResult: analysisState.pendingAIResult,
+          activityLog: analysisClone(analysisState.activityLog.slice(-160)),
+          pendingAIResult: analysisClone(analysisState.pendingAIResult),
           savedAt: new Date().toISOString()
         };
-        await window.projectRepository.setSection(analysisState.projectId, "analysis", payload, "analysis_save");
-        analysisSetSaveState("已保存", "saved");
-        const hasPlan = analysisState.plans.length > 0;
-        const hasReadyPlan = analysisState.plans.some((plan) => plan?.status === "ready");
-        if (window.updateProjectFromDashboard) {
-          window.updateProjectFromDashboard(analysisState.projectId, {
+        await window.projectRepository.setSection(projectId, "analysis", payload, "analysis_save");
+        if (analysisState.projectId === projectId) {
+          analysisSetSaveState("已保存", "saved");
+          const hasPlan = analysisState.plans.length > 0;
+          const hasReadyPlan = analysisState.plans.some((plan) => plan?.status === "ready");
+          if (window.updateProjectFromDashboard) window.updateProjectFromDashboard(projectId, {
             progress: hasReadyPlan ? "方案已完成" : hasPlan ? "方案设计中" : (analysisState.dataFiles.length ? "数据已导入" : "待导入数据"),
             status: hasPlan || analysisState.dataFiles.length ? "进行中" : "待开始"
           });
         }
       } catch (error) {
-        analysisSetSaveState("保存失败", "error");
-        analysisSetMessage(`分析方案保存失败：${error.message}`, "error");
+        if (analysisState.projectId === projectId) analysisSetSaveState("保存失败", "error");
+        throw error;
       }
     }
 
@@ -17180,9 +17351,14 @@
 
     function analysisScheduleSave() {
       if (!analysisState.projectId) return;
+      const projectId = analysisState.projectId;
+      const contextToken = analysisState.contextToken;
       analysisSetSaveState("待保存", "saving");
       clearTimeout(analysisState.saveTimer);
-      analysisState.saveTimer = setTimeout(analysisWriteWorkspace, 120);
+      analysisState.saveTimer = setTimeout(() => {
+        if (analysisState.projectId !== projectId || analysisState.contextToken !== contextToken) return;
+        analysisWriteWorkspace(projectId).catch(() => {});
+      }, 120);
     }
 
     function analysisSetSaveState(text, type = "") {
@@ -17226,6 +17402,7 @@
       const sheet = file?.sheets?.[0] || null;
       const plan = {
         id: analysisId("plan"),
+        projectId: analysisState.projectId,
         name: `分析方案 ${index}`,
         analysisUnitId: "",
         analysisQuestion: "",
@@ -17455,18 +17632,27 @@
     async function analysisLoadDashboardData(projectId) {
       if (!projectId) return [];
       try {
-        if (typeof dashboardState !== "undefined" && dashboardState.projectId === projectId) {
-          const rawFiles = Array.isArray(dashboardState.files) ? analysisClone(dashboardState.files) : [];
+        if (typeof dashboardState !== "undefined" && dashboardState.projectId === projectId && dashboardState.loadedProjectId === projectId) {
+          const rawFiles = Array.isArray(dashboardState.files)
+            ? analysisClone(dashboardState.files.filter((file) => !file?.ownerProjectId || file.ownerProjectId === projectId))
+            : [];
           const preprocessFiles = typeof window.dashboardPreprocessAsFiles === "function" ? analysisClone(window.dashboardPreprocessAsFiles(dashboardState.preprocessing)) : [];
-          if (rawFiles.length || preprocessFiles.length) return [...rawFiles, ...preprocessFiles];
+          return [...rawFiles, ...preprocessFiles];
         }
       } catch (error) {}
       try {
         const saved = await window.projectRepository.getSection(projectId, "dashboard");
-        if (saved) {
-          const rawFiles = Array.isArray(saved.files) ? analysisClone(saved.files) : [];
-          const preprocessFiles = typeof window.dashboardPreprocessAsFiles === "function" ? analysisClone(window.dashboardPreprocessAsFiles(saved.preprocessing)) : [];
-          if (rawFiles.length || preprocessFiles.length) return [...rawFiles, ...preprocessFiles];
+        if (saved && (!saved.projectId || saved.projectId === projectId)) {
+          const foreignOwnership = typeof dashboardForeignOwnership === "function"
+            ? await dashboardForeignOwnership(projectId)
+            : { fileIds: new Set(), preprocessTableIds: new Set() };
+          const rawFiles = Array.isArray(saved.files)
+            ? analysisClone(saved.files.filter((file) => file?.ownerProjectId ? file.ownerProjectId === projectId : !foreignOwnership.fileIds.has(String(file?.id || ""))))
+            : [];
+          const scopedPreprocessing = analysisClone(saved.preprocessing || {});
+          scopedPreprocessing.tables = (scopedPreprocessing.tables || []).filter((table) => table?.ownerProjectId ? table.ownerProjectId === projectId : !foreignOwnership.preprocessTableIds.has(String(table?.id || "")));
+          const preprocessFiles = typeof window.dashboardPreprocessAsFiles === "function" ? analysisClone(window.dashboardPreprocessAsFiles(scopedPreprocessing)) : [];
+          return [...rawFiles, ...preprocessFiles];
         }
       } catch (error) {}
       return [];
@@ -17502,35 +17688,50 @@
     };
 
     async function analysisSwitchProject(projectId, options = {}) {
-      const previousActivePlanId = options.preserveSelection ? analysisState.activePlanId : null;
-      if (analysisState.projectId && analysisState.projectId !== projectId) await analysisWriteWorkspace();
-      analysisState.projectId = projectId || null;
+      const targetProjectId = projectId || null;
+      const requestToken = ++analysisState.contextToken;
+      const previousActivePlanId = options.preserveSelection && analysisState.projectId === targetProjectId ? analysisState.activePlanId : null;
+      const previousProjectId = analysisState.projectId;
+      if (previousProjectId && previousProjectId !== targetProjectId && analysisState.saveTimer) {
+        await analysisWriteWorkspace(previousProjectId).catch(() => {});
+        if (analysisState.contextToken !== requestToken) return;
+      }
+      analysisState.projectId = targetProjectId;
+      analysisState.loadedProjectId = null;
       analysisState.requirement = "";
       analysisState.plans = [];
       analysisState.activePlanId = null;
       analysisState.dataFiles = [];
       analysisState.activityLog = [];
       analysisState.pendingAIResult = null;
-      if (projectId) {
-        localStorage.setItem("dataAnalysisAgent.activeProjectId", projectId);
+      if (targetProjectId) {
+        localStorage.setItem("dataAnalysisAgent.activeProjectId", targetProjectId);
         const [saved, dataFiles] = await Promise.all([
-          analysisReadWorkspace(projectId).catch(() => null),
-          analysisLoadDashboardData(projectId)
+          analysisReadWorkspace(targetProjectId).catch(() => null),
+          analysisLoadDashboardData(targetProjectId)
         ]);
+        if (analysisState.contextToken !== requestToken || analysisState.projectId !== targetProjectId) return;
         analysisState.dataFiles = dataFiles;
-        if (saved) {
+        if (saved && (!saved.projectId || saved.projectId === targetProjectId)) {
           analysisState.requirement = saved.requirement || "";
-          analysisState.plans = Array.isArray(saved.plans) ? saved.plans.map((plan, index) => analysisMigratePlan(plan, index)) : [];
-          analysisState.activePlanId = analysisState.plans.some((plan) => plan.id === previousActivePlanId) ? previousActivePlanId : (saved.activePlanId || analysisState.plans[0]?.id || null);
+          analysisState.plans = Array.isArray(saved.plans)
+            ? saved.plans
+              .filter((plan) => !plan?.projectId || plan.projectId === targetProjectId)
+              .map((plan, index) => ({ ...analysisMigratePlan(plan, index), projectId: targetProjectId }))
+            : [];
+          analysisState.activePlanId = analysisState.plans.some((plan) => plan.id === previousActivePlanId)
+            ? previousActivePlanId
+            : (analysisState.plans.some((plan) => plan.id === saved.activePlanId) ? saved.activePlanId : (analysisState.plans[0]?.id || null));
           analysisState.activityLog = Array.isArray(saved.activityLog) ? saved.activityLog : [];
           analysisState.pendingAIResult = saved.pendingAIResult || null;
         }
+        analysisState.loadedProjectId = targetProjectId;
       }
       analysisElements.requirementText.value = analysisState.requirement;
       analysisUpdateRequirementCount();
       analysisUpdateGate();
       analysisRenderAll();
-      if (projectId) {
+      if (targetProjectId) {
         analysisSetMessage(
           analysisState.dataFiles.length
             ? `已读取项目数据：${analysisState.dataFiles.length} 个文件、${analysisState.dataFiles.reduce((sum, file) => sum + (file.sheets?.length || 0), 0)} 张逻辑表。`
@@ -21389,6 +21590,8 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       currentTables: [],
       resultTablePages: {},
       currentError: "",
+      contextToken: 0,
+      loadedProjectId: null,
       stages: Object.fromEntries(EXECUTION_STAGE_DEFS.map(([code]) => [code, { status: "pending", detail: "等待开始" }]))
     };
 
@@ -21580,7 +21783,8 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
     async function executionReadWorkspace(projectId) {
       if (!projectId) return null;
       let saved = await window.projectRepository.getSection(projectId, "execution");
-      if (saved) return saved;
+      if (saved?.projectId && saved.projectId !== projectId) return null;
+      if (saved) return { ...saved, projectId };
       try {
         executionState.db = executionState.db || await executionOpenDb();
         saved = await new Promise((resolve, reject) => {
@@ -21589,7 +21793,10 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
           request.onsuccess = () => resolve(request.result || null);
           request.onerror = () => reject(request.error);
         });
-        if (saved) await window.projectRepository.setSection(projectId, "execution", saved, "legacy_migration");
+        if (saved && (!saved.projectId || saved.projectId === projectId)) {
+          saved = { ...saved, projectId };
+          await window.projectRepository.setSection(projectId, "execution", saved, "legacy_migration");
+        }
       } catch (error) {}
       return saved || null;
     }
@@ -21678,8 +21885,11 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
     };
 
     async function executionSwitchProject(projectId, options = {}) {
-      const previousSelectedPlanId = options.preserveSelection ? executionState.selectedPlanId : null;
-      executionState.projectId = projectId || null;
+      const targetProjectId = projectId || null;
+      const requestToken = ++executionState.contextToken;
+      const previousSelectedPlanId = options.preserveSelection && executionState.projectId === targetProjectId ? executionState.selectedPlanId : null;
+      executionState.projectId = targetProjectId;
+      executionState.loadedProjectId = null;
       executionState.plans = [];
       executionState.dataFiles = [];
       executionState.selectedPlanId = null;
@@ -21696,35 +21906,39 @@ analysis_units与plans必须一一对应且数量相同；plans数组长度必�
       executionState.currentError = "";
       executionResetStages();
       executionSetRunState("未开始");
-      if (projectId) {
-        localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectId);
+      if (targetProjectId) {
+        localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, targetProjectId);
         const [plans, dataFiles, saved] = await Promise.all([
-          executionLoadPlans(projectId), executionLoadData(projectId), executionReadWorkspace(projectId).catch(() => null)
+          executionLoadPlans(targetProjectId), executionLoadData(targetProjectId), executionReadWorkspace(targetProjectId).catch(() => null)
         ]);
-        executionState.plans = plans;
+        if (executionState.contextToken !== requestToken || executionState.projectId !== targetProjectId) return;
+        executionState.plans = plans.filter((plan) => !plan?.projectId || plan.projectId === targetProjectId).map((plan) => ({ ...plan, projectId: targetProjectId }));
         executionState.dataFiles = dataFiles;
         const savedPlan = saved?.selectedPlanId;
-        executionState.selectedPlanId = plans.some((plan) => plan.id === previousSelectedPlanId) ? previousSelectedPlanId : (plans.some((plan) => plan.id === savedPlan) ? savedPlan : (plans.find((plan) => plan.status === "ready")?.id || plans[0]?.id || null));
-        const savedArtifacts = saved?.planArtifacts && typeof saved.planArtifacts === "object" ? saved.planArtifacts : {};
-        const validPlanIds = new Set(plans.map((plan) => plan.id));
+        executionState.selectedPlanId = executionState.plans.some((plan) => plan.id === previousSelectedPlanId)
+          ? previousSelectedPlanId
+          : (executionState.plans.some((plan) => plan.id === savedPlan) ? savedPlan : (executionState.plans.find((plan) => plan.status === "ready")?.id || executionState.plans[0]?.id || null));
+        const savedArtifacts = saved?.projectId && saved.projectId !== targetProjectId ? {} : (saved?.planArtifacts && typeof saved.planArtifacts === "object" ? saved.planArtifacts : {});
+        const validPlanIds = new Set(executionState.plans.map((plan) => plan.id));
         executionState.planArtifacts = {};
         executionState.planRuns = {};
         Object.entries(savedArtifacts).forEach(([storedKey, artifact]) => {
           const planId = String(artifact?.planId || (storedKey.includes("::") ? storedKey.split("::").slice(1).join("::") : storedKey));
-          const artifactProjectId = String(artifact?.projectId || (storedKey.includes("::") ? storedKey.split("::")[0] : projectId));
-          if (artifactProjectId !== projectId || !validPlanIds.has(planId) || !executionIsAIArtifact(artifact)) return;
-          executionState.planArtifacts[executionArtifactKey(planId, projectId)] = { ...artifact, projectId, planId };
+          const artifactProjectId = String(artifact?.projectId || (storedKey.includes("::") ? storedKey.split("::")[0] : targetProjectId));
+          if (artifactProjectId !== targetProjectId || !validPlanIds.has(planId) || !executionIsAIArtifact(artifact)) return;
+          executionState.planArtifacts[executionArtifactKey(planId, targetProjectId)] = { ...artifact, projectId: targetProjectId, planId };
         });
-        const savedRuns = saved?.planRuns && typeof saved.planRuns === "object" ? saved.planRuns : {};
+        const savedRuns = saved?.projectId && saved.projectId !== targetProjectId ? {} : (saved?.planRuns && typeof saved.planRuns === "object" ? saved.planRuns : {});
         Object.entries(savedRuns).forEach(([storedKey, run]) => {
           const planId = String(run?.planId || (storedKey.includes("::") ? storedKey.split("::").slice(1).join("::") : storedKey));
-          const runProjectId = String(run?.projectId || (storedKey.includes("::") ? storedKey.split("::")[0] : projectId));
-          if (runProjectId !== projectId || !validPlanIds.has(planId) || !run?.result) return;
-          executionState.planRuns[executionArtifactKey(planId, projectId)] = { ...run, projectId, planId };
+          const runProjectId = String(run?.projectId || (storedKey.includes("::") ? storedKey.split("::")[0] : targetProjectId));
+          if (runProjectId !== targetProjectId || !validPlanIds.has(planId) || !run?.result) return;
+          executionState.planRuns[executionArtifactKey(planId, targetProjectId)] = { ...run, projectId: targetProjectId, planId };
         });
         executionState.missingPolicy = saved?.missingPolicy || executionSelectedPlan()?.missingPolicy || "listwise";
         executionLoadPlanArtifact(executionState.selectedPlanId);
         executionLoadPlanRun(executionState.selectedPlanId);
+        executionState.loadedProjectId = targetProjectId;
       } else {
         executionState.missingPolicy = "listwise";
         executionLoadPlanArtifact(null);
@@ -24624,7 +24838,9 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       running: false,
       aiRunning: false,
       exporting: false,
-      repositoryRevisions: { info: 0, dashboard: 0, analysis: 0, execution: 0, report: 0 }
+      repositoryRevisions: { info: 0, dashboard: 0, analysis: 0, execution: 0, report: 0 },
+      contextToken: 0,
+      loadedProjectId: null
     };
 
     const reportElements = {
@@ -24782,7 +24998,8 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     async function reportReadWorkspace(projectId) {
       if (!projectId) return null;
       let saved = await window.projectRepository.getSection(projectId, "report");
-      if (saved) return saved;
+      if (saved?.projectId && saved.projectId !== projectId) return null;
+      if (saved) return { ...saved, projectId };
       try {
         reportState.db = reportState.db || await reportOpenDb();
         saved = await new Promise((resolve, reject) => {
@@ -24791,7 +25008,10 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
           request.onsuccess = () => resolve(request.result || null);
           request.onerror = () => reject(request.error);
         });
-        if (saved) await window.projectRepository.setSection(projectId, "report", saved, "legacy_migration");
+        if (saved && (!saved.projectId || saved.projectId === projectId)) {
+          saved = { ...saved, projectId };
+          await window.projectRepository.setSection(projectId, "report", saved, "legacy_migration");
+        }
       } catch (error) {}
       return saved || null;
     }
@@ -24799,16 +25019,33 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
       reportElements.saveState.textContent = text;
       reportElements.saveState.className = `report-save-state${type ? ` ${type}` : ""}`;
     }
-    async function reportWriteWorkspace(captureInputs = true) {
-      if (!reportState.projectId) return;
+    async function reportWriteWorkspace(captureInputs = true, expectedProjectId = reportState.projectId) {
+      const projectId = expectedProjectId || reportState.projectId;
+      if (!projectId || reportState.projectId !== projectId) return;
       if (captureInputs) reportCaptureInputs();
       reportSetSaveState("保存中", "saving");
-      reportState.workspace.projectId = reportState.projectId;
-      reportState.workspace.selectedPlanId = reportState.selectedPlanId;
-      reportState.workspace.savedAt = new Date().toISOString();
-      await window.projectRepository.setSection(reportState.projectId, "report", reportClone(reportState.workspace), "report_save");
-      reportSetSaveState("已保存", "saved");
+      const validPlanIds = new Set(reportState.plans.filter((plan) => !plan?.projectId || plan.projectId === projectId).map((plan) => String(plan.id)));
+      const planReports = {};
+      Object.entries(reportState.workspace?.planReports || {}).forEach(([planId, item]) => {
+        if (!validPlanIds.has(String(planId))) return;
+        if (item?.projectId && item.projectId !== projectId) return;
+        if (item?.planId && String(item.planId) !== String(planId)) return;
+        planReports[planId] = reportClone({ ...item, projectId, planId });
+      });
+      const payload = {
+        ...reportClone(reportState.workspace || {}),
+        projectId,
+        selectedPlanId: validPlanIds.has(String(reportState.selectedPlanId || "")) ? reportState.selectedPlanId : null,
+        planReports,
+        savedAt: new Date().toISOString()
+      };
+      await window.projectRepository.setSection(projectId, "report", payload, "report_save");
+      if (reportState.projectId === projectId) {
+        reportState.workspace = payload;
+        reportSetSaveState("已保存", "saved");
+      }
     }
+
     window.reportFlushPendingSave = async function reportFlushPendingSave() {
       if (!reportState.projectId) return;
       clearTimeout(reportState.saveTimer);
@@ -24816,9 +25053,15 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     };
     function reportScheduleSave() {
       if (!reportState.projectId || !reportState.selectedPlanId) return;
+      const projectId = reportState.projectId;
+      const planId = reportState.selectedPlanId;
+      const contextToken = reportState.contextToken;
       clearTimeout(reportState.saveTimer);
       reportSetSaveState("待保存");
-      reportState.saveTimer = setTimeout(() => reportWriteWorkspace().catch((error) => reportSetSaveState(error.message || "保存失败", "error")), 500);
+      reportState.saveTimer = setTimeout(() => {
+        if (reportState.projectId !== projectId || reportState.selectedPlanId !== planId || reportState.contextToken !== contextToken) return;
+        reportWriteWorkspace(true, projectId).catch((error) => reportSetSaveState(error.message || "保存失败", "error"));
+      }, 500);
     }
 
     function reportDefaultReport(project, plan) {
@@ -24903,34 +25146,62 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     }
     window.reportSelectProject = reportSelectProject;
 
+    function reportNormalizeWorkspaceScope(workspace, projectId, plans) {
+      const validPlanIds = new Set((plans || []).map((plan) => String(plan.id)));
+      const normalized = workspace && (!workspace.projectId || workspace.projectId === projectId)
+        ? reportClone({ ...workspace, projectId })
+        : { projectId, selectedPlanId: null, planReports: {} };
+      const scopedReports = {};
+      Object.entries(normalized.planReports || {}).forEach(([planId, item]) => {
+        if (!validPlanIds.has(String(planId))) return;
+        if (item?.projectId && item.projectId !== projectId) return;
+        if (item?.planId && String(item.planId) !== String(planId)) return;
+        scopedReports[planId] = { ...item, projectId, planId };
+      });
+      normalized.planReports = scopedReports;
+      if (!validPlanIds.has(String(normalized.selectedPlanId || ""))) normalized.selectedPlanId = null;
+      return normalized;
+    }
+
     async function reportSwitchProject(projectId) {
-      if (reportState.projectId && reportState.projectId !== projectId) await reportWriteWorkspace().catch(() => {});
-      reportState.projectId = projectId || null;
+      const targetProjectId = projectId || null;
+      const requestToken = ++reportState.contextToken;
+      const previousProjectId = reportState.projectId;
+      if (previousProjectId && previousProjectId !== targetProjectId && reportState.saveTimer) {
+        clearTimeout(reportState.saveTimer);
+        reportState.saveTimer = null;
+        await reportWriteWorkspace(true, previousProjectId).catch(() => {});
+        if (reportState.contextToken !== requestToken) return;
+      }
+      reportState.projectId = targetProjectId;
+      reportState.loadedProjectId = null;
       reportState.plans = [];
       reportState.dataFiles = [];
       reportState.selectedPlanId = null;
       reportState.executionWorkspace = null;
-      reportState.workspace = { projectId: projectId || null, selectedPlanId: null, planReports: {} };
+      reportState.workspace = { projectId: targetProjectId, selectedPlanId: null, planReports: {} };
       reportState.currentReport = null;
-      if (projectId) {
-        localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectId);
+      if (targetProjectId) {
+        localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, targetProjectId);
         const [plans, dataFiles, executionWorkspace, reportWorkspace, repositoryRecord] = await Promise.all([
-          executionLoadPlans(projectId),
-          executionLoadData(projectId),
-          executionReadWorkspace(projectId).catch(() => null),
-          reportReadWorkspace(projectId).catch(() => null),
-          window.projectRepository.get(projectId).catch(() => null)
+          executionLoadPlans(targetProjectId),
+          executionLoadData(targetProjectId),
+          executionReadWorkspace(targetProjectId).catch(() => null),
+          reportReadWorkspace(targetProjectId).catch(() => null),
+          window.projectRepository.get(targetProjectId).catch(() => null)
         ]);
-        reportState.plans = plans;
+        if (reportState.contextToken !== requestToken || reportState.projectId !== targetProjectId) return;
+        reportState.plans = plans.filter((plan) => !plan?.projectId || plan.projectId === targetProjectId).map((plan) => ({ ...plan, projectId: targetProjectId }));
         reportState.dataFiles = dataFiles;
-        reportState.executionWorkspace = executionWorkspace || { projectId, planArtifacts: {}, planRuns: {} };
+        reportState.executionWorkspace = executionWorkspace && (!executionWorkspace.projectId || executionWorkspace.projectId === targetProjectId)
+          ? { ...executionWorkspace, projectId: targetProjectId }
+          : { projectId: targetProjectId, planArtifacts: {}, planRuns: {} };
         reportState.repositoryRevisions = repositoryRecord?.revisions || { info: 0, dashboard: 0, analysis: 0, execution: 0, report: 0 };
-        reportState.workspace = reportWorkspace && reportWorkspace.projectId === projectId
-          ? reportWorkspace
-          : { projectId, selectedPlanId: null, planReports: {} };
+        reportState.workspace = reportNormalizeWorkspaceScope(reportWorkspace, targetProjectId, reportState.plans);
         const savedPlanId = reportState.workspace.selectedPlanId;
-        const firstCodePlan = plans.find((plan) => reportState.executionWorkspace?.planArtifacts?.[`${projectId}::${plan.id}`]);
-        reportState.selectedPlanId = plans.some((plan) => plan.id === savedPlanId) ? savedPlanId : (firstCodePlan?.id || plans[0]?.id || null);
+        const firstCodePlan = reportState.plans.find((plan) => reportState.executionWorkspace?.planArtifacts?.[`${targetProjectId}::${plan.id}`]);
+        reportState.selectedPlanId = reportState.plans.some((plan) => plan.id === savedPlanId) ? savedPlanId : (firstCodePlan?.id || reportState.plans[0]?.id || null);
+        reportState.loadedProjectId = targetProjectId;
       }
       reportRenderPlanOptions();
       reportLoadSelectedPlan();
@@ -24938,36 +25209,24 @@ function __systemExportResultTable(table, index) {\n  const aoa = [table.columns
     }
 
     async function reportRefreshContext(showMessage = true) {
-      const projectId = reportState.projectId || reportElements.projectSelect.value || "";
+      const projectId = reportElements.projectSelect.value || reportState.projectId || "";
       if (!projectId) {
         const selected = await reportRefreshProjectOptions();
         if (selected) return reportSwitchProject(selected);
         reportRenderAll();
         return;
       }
-      if (reportState.projectId !== projectId) return reportSwitchProject(projectId);
-      const selectedPlanId = reportState.selectedPlanId;
-      const [plans, dataFiles, executionWorkspace, reportWorkspace, repositoryRecord] = await Promise.all([
-        executionLoadPlans(projectId),
-        executionLoadData(projectId),
-        executionReadWorkspace(projectId).catch(() => null),
-        reportReadWorkspace(projectId).catch(() => null),
-        window.projectRepository.get(projectId).catch(() => null)
-      ]);
-      reportState.plans = plans;
-      reportState.dataFiles = dataFiles;
-      reportState.executionWorkspace = executionWorkspace || { projectId, planArtifacts: {}, planRuns: {} };
-      reportState.repositoryRevisions = repositoryRecord?.revisions || { info: 0, dashboard: 0, analysis: 0, execution: 0, report: 0 };
-      reportState.workspace = reportWorkspace && reportWorkspace.projectId === projectId
-        ? reportWorkspace
-        : (reportState.workspace?.projectId === projectId ? reportState.workspace : { projectId, selectedPlanId: null, planReports: {} });
-      reportState.selectedPlanId = plans.some((plan) => plan.id === selectedPlanId)
-        ? selectedPlanId
-        : (plans.some((plan) => plan.id === reportState.workspace.selectedPlanId) ? reportState.workspace.selectedPlanId : (plans[0]?.id || null));
-      reportRenderPlanOptions();
-      reportLoadSelectedPlan();
-      reportRenderAll();
-      if (showMessage) reportSetMessage(reportElements.contextMessage, `已从项目仓库刷新：${plans.length} 套方案、${dataFiles.reduce((sum, file) => sum + (file.sheets?.length || 0), 0)} 张逻辑表及对应代码、结果和报告。`);
+      const selectedPlanId = reportState.projectId === projectId ? reportState.selectedPlanId : null;
+      await reportSwitchProject(projectId);
+      if (reportState.projectId !== projectId) return;
+      if (selectedPlanId && reportState.plans.some((plan) => plan.id === selectedPlanId)) {
+        reportState.selectedPlanId = selectedPlanId;
+        reportState.workspace.selectedPlanId = selectedPlanId;
+        reportRenderPlanOptions();
+        reportLoadSelectedPlan();
+        reportRenderAll();
+      }
+      if (showMessage) reportSetMessage(reportElements.contextMessage, `已从项目仓库刷新：${reportState.plans.length} 套方案、${reportState.dataFiles.reduce((sum, file) => sum + (file.sheets?.length || 0), 0)} 张逻辑表及对应代码、结果和报告。`);
     }
 
     window.reportRefreshContext = reportRefreshContext;
